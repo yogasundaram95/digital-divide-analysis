@@ -1,0 +1,29 @@
+# R files
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+.RDataTmp*
+
+# Large raw data files (too big for GitHub)
+raw_data/ookla_csv/*.csv
+raw_data/ookla/**/*.dbf
+raw_data/ookla/**/*.shp
+raw_data/geographic/*.shp
+raw_data/geographic/*.dbf
+raw_data/*.csv
+
+# Large processed spatial files (>50MB)
+processed_data/*_sf.rds
+processed_data/counties_sf.rds
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*~
+*.tmp
+*.bak
+*.tex

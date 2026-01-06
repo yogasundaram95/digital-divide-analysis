@@ -1,0 +1,51 @@
+GEOID,state_name,county_name,airband_fcc_availability,airband_usage
+02185,AK,North Slope Borough,0.0061,0.051
+02188,AK,Northwest Arctic Borough,0.0081,0.039
+02198,AK,Prince of Wales-Hyder Census Area,0.0282,0.04
+02290,AK,Yukon-Koyukuk Census Area,0.013,0.139
+01063,AL,Greene County,0.0085,0.013
+01105,AL,Perry County,0.0012,0.032
+05013,AR,Calhoun County,0.0852,0.202
+05095,AR,Monroe County,0.0557,0.058
+12029,FL,Dixie County,0.0078,0.041
+13053,GA,Chattahoochee County,0.5456,0.755
+13101,GA,Echols County,2e-4,0.034
+13125,GA,Glascock County,0.0101,0.033
+13201,GA,Miller County,0.1072,0.187
+13259,GA,Stewart County,0.0082,0.047
+13301,GA,Warren County,0.0019,0.049
+15005,HI,Kalawao County,0.1977,0.221
+16069,ID,Nez Perce County,0.8671,0.87
+17003,IL,Alexander County,9e-4,0.104
+20119,KS,Meade County,0.001,0.141
+20151,KS,Pratt County,0.7943,0.884
+22023,LA,Cameron Parish,0.0184,0.134
+22107,LA,Tensas Parish,0.0305,0.054
+26095,MI,Luce County,0.0393,0.093
+29017,MO,Bollinger County,0.0161,0.066
+29089,MO,Howard County,0.1625,0.183
+29153,MO,Ozark County,0.0375,0.048
+29157,MO,Perry County,0.5334,0.6
+28031,MS,Covington County,0.0451,0.054
+28055,MS,Issaquena County,0.0173,0.145
+28063,MS,Jefferson County,0.0309,0.053
+30033,MT,Garfield County,0.4285,0.779
+30055,MT,McCone County,0.4946,0.514
+30109,MT,Wibaux County,0.0826,0.125
+38053,ND,McKenzie County,0.7279,0.878
+35053,NM,Socorro County,0.0453,0.211
+32015,NV,Lander County,0.0022,0.056
+32033,NV,White Pine County,0.0095,0.083
+41021,OR,Gilliam County,0.3797,0.409
+45065,SC,McCormick County,0.4012,0.439
+48211,TX,Hemphill County,0.0937,0.219
+48271,TX,Kinney County,0.0221,0.091
+48301,TX,Loving County,0.3018,0.941
+49019,UT,Grand County,0.5325,0.813
+51570,VA,Colonial Heights city,0.9872,1
+51610,VA,Falls Church city,0.986,1
+51081,VA,Greensville County,0.2399,0.377
+51683,VA,Manassas city,0.9611,1
+51820,VA,Waynesboro city,0.9838,1
+51840,VA,Winchester city,0.9978,1
+54061,WV,Monongalia County,0.5361,0.562

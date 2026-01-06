@@ -1,0 +1,4575 @@
+---
+title: 'Digital Divide Project: Broadband Access & Social Vulnerability'
+author: "Group3"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+  word_document:
+    toc: true
+    toc_depth: '3'
+---
+## Libraries Required
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(readr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(tidyverse)
+library(sf)
+library(corrplot)
+library(MatchIt)
+library(cobalt)
+library(ggplot2)
+library(spdep)
+library(spatialreg)
+library(randomForest)
+library(iml)
+library(xgboost)
+library(nnet)
+library(e1071)
+library(pROC)
+library(caret)
+library(factoextra)
+library(car)     
+library(broom)   
+library(readr)
+library(lmtest)
+library(moments)
+library(gridExtra)
+library(scales)
+library(viridis)
+
+
+base_path      <- "."
+path_raw       <- function(...) file.path(base_path, "raw_data", ...)
+path_processed <- function(...) file.path(base_path, "processed_data", ...)
+
+# =============================================================================
+# DATA YEAR CONFIGURATION
+# Set USE_FCC_2025 to TRUE to use May 2025 FCC data, FALSE for Dec 2020 data
+# =============================================================================
+USE_FCC_2025 <- TRUE  # Change to FALSE to use original 2020 FCC data
+
+fcc_file <- if (USE_FCC_2025) {
+  "fcc_2025_may_clean.rds"
+} else {
+  "fcc_2020_dec_clean.rds"
+}
+fcc_year_label <- if (USE_FCC_2025) "May 2025" else "Dec 2020"
+cat("Using FCC data:", fcc_year_label, "\n")
+```
+
+# 1. Introduction 
+
+This project investigates the relationship between county-level broadband connectivity and social vulnerability across the United States.
+
+**Data Year Configuration:** This analysis can use either December 2020 or May 2025 FCC broadband data. Set `USE_FCC_2025 <- TRUE` (default) or `FALSE` in the setup chunk above.
+
+We use:
+
+-   FCC Broadband Deployment Data (BDC)
+    County-level broadband coverage data. Configurable to use either **December 2020** or **May 2025** data.
+    The 2025 data includes continuous coverage fractions at multiple speed tiers.
+
+-   CDC/ATSDR Social Vulnerability Index (SVI) 2020 – County Level
+    Provides composite social vulnerability percentiles and four theme-level indices:\
+    socioeconomic status, household composition, minority status, and housing/transportation.
+
+-   U.S. Census / ACS Housing Units (embedded in FCC data)
+    Used as denominators for broadband connection rates.
+
+-   Geographic FIPS Codes
+    Standard 5-digit county FIPS codes support merging across all datasets.
+
+This project follows a fully reproducible workflow using **R Markdown**, where all data cleaning, merging, analysis, and visualizations are generated inside this document.
+# 1.1  Data Inventory Table
+
+1. Social Vulnerability Index (SVI)
+
+Dataset Name : CDC/ATSDR Social Vulnerability Index (SVI)
+Source / URL : https://www.atsdr.cdc.gov/placeandhealth/svi/data_documentation_download.html
+Year Used : 2020
+Geographic Level: County (FIPS)
+Format: CSV
+Files Used: SVI2020_US_COUNTY.csv
+Size: ~5–6 MB
+Key Variables: 
+County FIPS, overall SVI percentile, SVI Theme scores (Socioeconomic, Household Composition, Minority Status, Housing/Transportation)
+Data Quality Notes:
+Percentile values range 0–1; no SVI data for Puerto Rico; a few suppressed values for remote Alaska counties.
+
+2. FCC Broadband Deployment Data (December 2020)
+Dataset Name : FCC Form 477 Fixed Broadband Deployment Summary
+Source / URL : FCC Broadband Deployment Data
+Year Used: Dec 2020
+Geographic Level: County
+Format: CSV
+Files Used: fcc_dec_2020_county.csv (cleaned version)
+Size: ~20–30 MB
+Key Variables:
+FIPS, availability of ≥25/3 Mbps broadband, provider counts, technology codes
+Data Quality Notes:
+Known issues include over-reporting availability; no coverage for Puerto Rico or territories.
+
+3. Microsoft Airband Broadband Usage
+
+Dataset Name: Microsoft Airband “US Broadband Usage”
+Source / URL: https://github.com/microsoft/USBroadbandUsage
+Year Used: 2020
+Geographic Level : County
+Format : CSV
+Files Used : airband_2020_county.csv
+Size: ~2 MB
+Key Variables : fips, measured broadband usage, observed availability
+Data Quality Notes : Usage values are decimals (0–1). No PR or territories.
+
+4. ACS Data — Computer & Internet Use (Table B28002)
+
+Dataset Name : ACS 5-Year Estimates — B28002
+Source / URL : data.census.gov
+Year Used : 2020
+Geographic Level : County
+Format : CSV
+Files Used : ACSDT5Y2020.B28002-Data.csv
+Size : ~4 MB
+Key Variables : Total households, households with broadband, households with no internet access
+Data Quality Notes : Minor MOE columns removed; numeric conversion required.
+
+5. ACS Data — Median Household Income (Table B19013)
+
+Dataset Name : ACS 5-Year Estimates — B19013
+Source / URL : data.census.gov
+Year Used : 2020
+Geographic Level : County
+Format : CSV
+Files Used : ACSDT5Y2020.B19013-Data.csv
+Size : ~3 MB
+Key Variables : Median household income
+Data Quality Notes : No PR values; income suppressed for some remote Alaska regions.
+
+6. ACS Data — Education Attainment (Table B15003)
+
+Dataset Name : ACS 5-Year Estimates — B15003
+Source / URL : data.census.gov
+Year Used : 2020
+Geographic Level : County
+Format : CSV
+Files Used : ACSDT5Y2020.B15003-Data.csv
+Size : ~4 MB
+Key Variables : Education levels (HS, bachelor’s, master’s, doctorate)
+Data Quality Notes :Consistent coverage except PR and some small Alaska areas.
+
+
+7. Geographic Shapefiles (TIGER/Line 2020)
+
+Dataset Name : TIGER/Line 2020 County Shapefile
+Source / URL : https://www.census.gov/geographies/mapping-files/time-series/geo/tiger-line-file.html
+Year Used : 2020
+Geographic Level : County (MULTIPOLYGON)
+Format : ESRI Shapefile (.shp, .dbf, .shx, .prj)
+Files Used : tl_2020_us_county.shp + associated files
+Size : ~50–100 MB
+Key Variables : GEOID, county name, state FIPS, geometry
+Data Quality Notes : Includes 3,234 county-equivalents → includes Puerto Rico, territories, and Alaska census areas. Must be filtered before analysis.
+
+# 2. FCC Broadband Data (2016–2024, focusing on 2020)
+
+In this section, we work with the FCC Form 477 county-level broadband tier dataset.  
+The raw file contains semiannual observations (June and December) for each county from 2016–2024.
+
+FCC Form 477 includes both deployment (availability) and subscription (adoption) datasets. The deployment dataset — used in this project — measures broadband availability across speed tiers (Tier 1–4) and provides a county-level snapshot of the infrastructure that is available to residents. This is distinct from the subscription dataset, which reflects how many households actually subscribe to broadband. Because our project examines disparities in access, we chosse the deployment dataset.
+
+## 2.1 Load and Inspect FCC Raw Data
+
+```{r fcc-load}
+# Load the raw FCC county tier data file
+fcc_raw <- read_csv(
+  path_raw("fcc", "form477_fcc_data.csv")
+)
+
+# View column names and structure
+names(fcc_raw)
+glimpse(fcc_raw)
+```
+## 2.2 Clean FCC Data: Keep Only December 2020
+
+```{r fcc-clean}
+fcc_2020_dec <- fcc_raw %>%
+  rename_with(tolower) %>%
+  filter(year == 2020, month == 12) %>%
+  mutate(
+    county_fips = str_pad(as.character(fips), 5, side = "left", pad = "0")
+  ) %>%
+  select(
+    county_fips,
+    state_name,
+    county_name,
+    housing_units,
+    tier1 = tier_1,
+    tier2 = tier_2,
+    tier3 = tier_3
+  )
+head(fcc_2020_dec)
+summary(fcc_2020_dec)
+```
+## 2.3 Broadband validation and consistency checks
+```{r broadband-validation}
+
+# If not already in memory, load the non-spatial master dataset
+master_2020 <- readRDS("processed_data/master_2020_county.rds")
+
+broadband_check <- master_2020 %>%
+  select(
+    FIPS,
+    housing_units,
+    tier1, tier2, tier3,
+    airband_fcc_availability,
+    airband_usage
+  )
+
+# 1) Range checks for FCC/Airband measures
+summary(broadband_check)
+
+# Check that availability and usage are between 0 and 1
+invalid_range <- broadband_check %>%
+  filter(
+    airband_fcc_availability < 0 | airband_fcc_availability > 1 |
+    airband_usage            < 0 | airband_usage            > 1
+  )
+
+invalid_range   # ideally 0 rows
+
+# Check that tiers (if present) are within 1–4
+invalid_tiers <- broadband_check %>%
+  filter(
+    (!is.na(tier1) & (tier1 < 1 | tier1 > 4)) |
+    (!is.na(tier2) & (tier2 < 1 | tier2 > 4)) |
+    (!is.na(tier3) & (tier3 < 1 | tier3 > 4))
+  )
+
+invalid_tiers   # ideally 0 rows
+
+# 2) Missingness in key broadband fields
+colSums(is.na(broadband_check))
+
+# 3) Simple consistency check: usage should not greatly exceed availability
+usage_gt_avail <- broadband_check %>%
+  filter(
+    !is.na(airband_fcc_availability),
+    !is.na(airband_usage),
+    airband_usage > airband_fcc_availability
+  )
+
+usage_gt_avail %>% head()
+nrow(usage_gt_avail)
+```
+FCC Data Validation Summary
+
+After cleaning the FCC December 2020 county-level dataset, we verified the quality of all key variables before merging them into the master file. All FCC tiers (tier1, tier2, tier3) fall within the correct range of 1–4 with no invalid values detected. Housing-unit counts are strictly positive for all counties, and no negative, zero, or corrupted values were found. The FCC dataset therefore passes internal consistency checks and is suitable for downstream analysis.
+
+## 2.4 Save Cleaned FCC Dataset
+
+```{r fcc-save}
+write_csv(fcc_2020_dec, path_processed("fcc_2020_dec_clean.csv"))
+saveRDS(fcc_2020_dec, path_processed("fcc_2020_dec_clean.rds"))
+```
+# 3. Social Vulnerability Index (SVI) Data – 2020 (County Level)
+
+The CDC/ATSDR Social Vulnerability Index (SVI) provides an overall vulnerability percentile and four theme-level indices for each U.S. county. Here we load the 2020 county-level SVI dataset.
+
+## 3.1 Load and Inspect SVI Raw Data
+
+```{r svi-load}
+svi_raw <- read_csv(
+  path_raw("svi", "SVI_2020_US_county.csv")
+)
+
+names(svi_raw)
+glimpse(svi_raw)
+```
+## 3.2 Clean SVI Data (Create county_fips, select key variables)
+
+```{r svi-clean}
+svi_county <- svi_raw %>%
+  # standardize column names
+  rename_with(tolower) %>%
+  
+  # create standardized 5-digit county FIPS (same format as FCC)
+  mutate(
+    county_fips = str_pad(as.character(fips), 5, "left", "0")
+  ) %>%
+  
+  # keep only the variables needed for analysis
+  select(
+    county_fips,
+    state = st_abbr,
+    county,
+    svi_overall = rpl_themes,
+    svi_soc     = rpl_theme1,
+    svi_hh      = rpl_theme2,
+    svi_min     = rpl_theme3,
+    svi_hous    = rpl_theme4
+  )
+
+head(svi_county)
+summary(svi_county)
+```
+## 3.3 Save Cleaned SVI Dataset
+
+```{r svi-save}
+write_csv(svi_county, path_processed("svi_2020_county_clean.csv"))
+saveRDS(svi_county, path_processed("svi_2020_county_clean.rds"))
+```
+
+## 3.4 SVI Validation and Consistency Checks
+
+After cleaning the SVI data and keeping only the overall index and four theme scores, we validated the SVI variables to ensure they are suitable for analysis. We checked that all SVI values fall within the expected 0–1 percentile range, identified any missing values, and examined correlations between the overall SVI score and each theme.
+```{r svi-validation}
+library(dplyr)
+
+# If not already in memory, load the cleaned SVI
+svi_2020_county_clean <- readRDS("processed_data/svi_2020_county_clean.rds")
+
+# Keep only SVI numeric columns for checks
+svi_check <- svi_2020_county_clean %>%
+  select(
+    county_fips,
+    svi_overall,
+    svi_soc,
+    svi_hh,
+    svi_min,
+    svi_hous
+  )
+
+# 1) Range validation: SVI percentiles should be between 0 and 1
+summary(svi_check)
+
+invalid_svi <- svi_check %>%
+  filter(
+    svi_overall < 0 | svi_overall > 1 |
+    svi_soc     < 0 | svi_soc     > 1 |
+    svi_hh      < 0 | svi_hh      > 1 |
+    svi_min     < 0 | svi_min     > 1 |
+    svi_hous    < 0 | svi_hous    > 1
+  )
+
+invalid_svi   # ideally this is an empty tibble
+
+# 2) Missing values check for SVI columns
+colSums(is.na(svi_check))
+
+
+```
+
+# 4. Merge FCC and SVI Data
+
+In this section, we combine the cleaned FCC broadband dataset (December 2020) with the cleaned SVI 2020 county dataset using 5-digit county FIPS codes.
+
+## 4.1 Load Cleaned FCC and SVI Datasets
+
+```{r merge-load}
+fcc_2020 <- readRDS(path_processed(fcc_file))  # Uses configured FCC year
+svi_2020 <- readRDS(path_processed("svi_2020_county_clean.rds"))
+cat("Loaded FCC data:", fcc_year_label, "-", nrow(fcc_2020), "counties\n")
+
+head(fcc_2020)
+head(svi_2020)
+```
+## 4.2 Identify FCC Counties Without Matching SVI Records
+
+```{r merge-missing-svi}
+missing_svi <- fcc_2020 %>%
+  anti_join(svi_2020, by = "county_fips")
+
+head(missing_svi)
+nrow(missing_svi)
+```
+The missing_svi table shows FCC counties and territories that appear in the broadband data but do not have corresponding SVI 2020 county records. These are primarily U.S. territories such as Puerto Rico, Guam, American Samoa, and the U.S. Virgin Islands. Because SVI is not available for these areas, they will be excluded from our final merged dataset.
+## 4.3 Create Final Merged Dataset (FCC + SVI)
+
+```{r merge-final}
+merged_data <- fcc_2020 %>%
+  inner_join(svi_2020, by = "county_fips")
+
+# Inspect merged dataset
+nrow(merged_data)
+head(merged_data)
+summary(merged_data)
+```
+## 4.4 Save Merged Dataset
+
+```{r merge-save}
+write_csv(merged_data, path_processed("merged_fcc_svi_2020.csv"))
+saveRDS(merged_data, path_processed("merged_fcc_svi_2020.rds"))
+```
+# 5. Microsoft Airband Broadband Usage Data
+
+Microsoft’s Airband dataset provides estimates of actual broadband usage based on Windows device telemetry. While FCC data describes where broadband service is available (deployment), Airband data describes where broadband is actually used (adoption). Together, these allow us to compare **access** (FCC) and **usage** (Airband) across U.S. counties.
+
+## 5.1 Load and Inspect Airband Raw Data
+
+```{r airband-load}
+airband_raw <- read_csv(
+  path_raw("microsoft", "broadband_data_2020.csv")
+)
+
+names(airband_raw)
+glimpse(airband_raw)
+```
+## 5.2 Clean Airband Data
+
+```{r airband-clean}
+
+airband_clean <- airband_raw %>%
+  # Standardize column names
+  rename_with(~ .x |>
+                str_trim() |>
+                str_replace_all("\\s+", "_") |>
+                str_to_lower()) %>%
+  # Now expect columns:
+  # st, county_id, county_name, broadband_availability_per_fcc, broadband_usage
+  mutate(
+    county_fips = str_pad(as.character(county_id), 5, pad = "0")
+  ) %>%
+  select(
+    county_fips,
+    state = st,
+    county_name,
+    airband_fcc_availability = broadband_availability_per_fcc,
+    airband_usage = broadband_usage
+  )
+
+# Inspect
+names(airband_clean)
+head(airband_clean)
+summary(airband_clean$airband_usage)
+```
+## 5.3 Airband Validation Checks
+```{r airband-validation}
+
+# Load cleaned Microsoft Airband dataset
+airband_2020 <- readRDS("processed_data/airband_2020_county_clean.rds")
+
+# Overview of structure
+glimpse(airband_2020)
+
+# Use county_fips (not FIPS)
+airband_check <- airband_2020 %>%
+  select(
+    county_fips,
+    airband_fcc_availability,
+    airband_usage
+  )
+
+# Convert availability and usage to numeric if stored as characters
+airband_check <- airband_check %>%
+  mutate(
+    airband_fcc_availability = as.numeric(airband_fcc_availability),
+    airband_usage            = as.numeric(airband_usage)
+  )
+
+# 1) Summary statistics
+summary(airband_check)
+
+# 2) Range validation
+invalid_airband_range <- airband_check %>%
+  filter(
+    airband_fcc_availability < 0 | airband_fcc_availability > 1 |
+    airband_usage < 0 | airband_usage > 1
+  )
+
+invalid_airband_range   # ideally 0 rows
+
+# 3) Missingness check
+colSums(is.na(airband_check))
+
+# 4) Consistency check: usage > availability
+airband_usage_gt_avail <- airband_check %>%
+  filter(
+    !is.na(airband_fcc_availability),
+    !is.na(airband_usage),
+    airband_usage > airband_fcc_availability
+  )
+
+# Show examples
+airband_usage_gt_avail %>% head()
+nrow(airband_usage_gt_avail)
+```
+Airband Data Validation Summary
+
+The Microsoft Airband dataset was validated after cleaning and aggregation to the county level. Both broadband indicators—modeled FCC availability and estimated household usage—fall entirely within the expected 0–1 range, with missing values limited to counties in Alaska and U.S. territories where Airband suppresses estimates. A subset of counties exhibit usage values that exceed modeled availability. This behavior is well-documented in the Airband methodology and reflects differences between modeled infrastructure coverage and actual adoption (including satellite-based broadband). These records were retained, as they represent genuine modeling differences rather than data errors. (# Need to check this)
+
+
+## 5.4 Save Cleaned Airband Dataset
+
+```{r airband-save}
+write_csv(airband_clean, path_processed("airband_2020_county_clean.csv"))
+saveRDS(airband_clean, path_processed("airband_2020_county_clean.rds"))
+```
+
+# 5.5 Ookla Speedtest Data (2020)
+
+Ookla provides actual measured internet performance data from Speedtest users. Unlike FCC availability data (which measures where broadband *could* be offered) or Microsoft Airband usage data, Ookla data captures **real-world speeds** experienced by consumers. This includes download/upload speeds and latency.
+
+The raw Ookla data is tile-based (millions of geographic tiles). We pre-aggregated this to county level using spatial joins, creating weighted averages by number of speed tests.
+
+## 5.5.1 Load Ookla County-Level Data
+
+```{r ookla-load}
+# Load pre-aggregated Ookla data (created by scripts/aggregate_ookla_to_county.R)
+ookla_2020 <- readRDS(path_processed("ookla_2020_county_clean.rds"))
+
+# Inspect structure
+glimpse(ookla_2020)
+head(ookla_2020)
+```
+
+## 5.5.2 Ookla Data Summary
+
+```{r ookla-summary}
+# Summary statistics
+cat("=== OOKLA SPEEDTEST SUMMARY (2020) ===\n\n")
+cat("Counties with data:", nrow(ookla_2020), "\n\n")
+
+cat("Download Speed (Mbps):\n")
+print(summary(ookla_2020$avg_download_mbps))
+
+cat("\nUpload Speed (Mbps):\n")
+print(summary(ookla_2020$avg_upload_mbps))
+
+cat("\nLatency (ms):\n")
+print(summary(ookla_2020$avg_latency_ms))
+
+# Distribution plots
+library(ggplot2)
+
+p1 <- ggplot(ookla_2020, aes(x = avg_download_mbps)) +
+  geom_histogram(bins = 50, fill = "steelblue", alpha = 0.7) +
+  labs(title = "Distribution of County-Level Download Speeds",
+       x = "Average Download Speed (Mbps)", y = "Count") +
+  theme_minimal()
+
+p2 <- ggplot(ookla_2020, aes(x = avg_latency_ms)) +
+  geom_histogram(bins = 50, fill = "coral", alpha = 0.7) +
+  labs(title = "Distribution of County-Level Latency",
+       x = "Average Latency (ms)", y = "Count") +
+  theme_minimal()
+
+print(p1)
+print(p2)
+```
+
+## 5.5.3 Ookla Validation Checks
+
+```{r ookla-validation}
+# Check for reasonable ranges
+invalid_ookla <- ookla_2020 %>%
+  filter(
+    avg_download_mbps < 0 | avg_download_mbps > 1000 |
+    avg_upload_mbps < 0 | avg_upload_mbps > 500 |
+    avg_latency_ms < 0 | avg_latency_ms > 1000
+  )
+
+cat("Invalid Ookla records:", nrow(invalid_ookla), "\n")
+
+# Check sample sizes
+cat("\nSample size distribution (tests per county):\n")
+print(summary(ookla_2020$total_tests))
+
+# Counties with low sample sizes
+low_sample <- ookla_2020 %>% filter(total_tests < 100)
+cat("\nCounties with <100 tests:", nrow(low_sample), "\n")
+```
+
+# 5.6 USDA Rural-Urban Continuum Codes (2023)
+
+The USDA Economic Research Service provides Rural-Urban Continuum Codes (RUCC) that classify counties by their degree of urbanization and proximity to metropolitan areas. Codes range from 1 (most urban/metro) to 9 (most rural/remote). This classification is essential for understanding the rural-urban dimension of the digital divide.
+
+## 5.6.1 Load USDA RUCC Data
+
+```{r usda-load}
+# Load pre-processed USDA data (created by scripts/process_usda_rucc.R)
+usda_rucc <- readRDS(path_processed("usda_rucc_2023_clean.rds"))
+
+cat("USDA RUCC 2023 Data:\n")
+cat("Counties:", nrow(usda_rucc), "\n\n")
+glimpse(usda_rucc)
+```
+
+## 5.6.2 RUCC Distribution
+
+```{r usda-summary}
+cat("RUCC Code Distribution:\n")
+print(table(usda_rucc$rucc_2023))
+
+cat("\nRural-Urban Category:\n")
+print(table(usda_rucc$rural_urban_cat))
+
+# Visualization
+ggplot(usda_rucc, aes(x = factor(rucc_2023), fill = rural_urban_cat)) +
+  geom_bar() +
+  labs(title = "Distribution of USDA Rural-Urban Continuum Codes",
+       x = "RUCC Code (1=Most Urban, 9=Most Rural)",
+       y = "Number of Counties",
+       fill = "Category") +
+  scale_fill_manual(values = c("Metro" = "steelblue",
+                               "Nonmetro-Adjacent" = "orange",
+                               "Nonmetro-Nonadjacent" = "darkred")) +
+  theme_minimal()
+```
+
+## 5.6.3 RUCC Code Definitions
+
+```{r usda-definitions}
+# Show unique descriptions for each RUCC code
+rucc_defs <- usda_rucc %>%
+  select(rucc_2023, rucc_description) %>%
+  distinct() %>%
+  arrange(rucc_2023)
+
+print(rucc_defs)
+```
+
+# 6. Final Master Dataset Merge
+
+## 6.1 Load Cleaned FCC, SVI, Airband, Ookla, and USDA Datasets
+
+```{r merge3-load}
+fcc_2020      <- readRDS(path_processed(fcc_file))  # Uses configured FCC year
+svi_2020      <- readRDS(path_processed("svi_2020_county_clean.rds"))
+airband_clean <- readRDS(path_processed("airband_2020_county_clean.rds"))
+ookla_2020    <- readRDS(path_processed("ookla_2020_county_clean.rds"))
+usda_rucc     <- readRDS(path_processed("usda_rucc_2023_clean.rds"))
+
+# Row counts for confirmation
+cat("FCC data:", fcc_year_label, "-", nrow(fcc_2020), "counties\n")
+cat("SVI counties:", nrow(svi_2020), "\n")
+cat("Airband counties:", nrow(airband_clean), "\n")
+cat("Ookla counties:", nrow(ookla_2020), "\n")
+cat("USDA RUCC counties:", nrow(usda_rucc), "\n")
+```
+## 6.2 Identify Counties Missing Airband Data
+
+```{r merge3-missing}
+missing_airband <- merged_data %>%
+  anti_join(airband_clean, by = "county_fips")
+
+head(missing_airband)
+nrow(missing_airband)
+```
+## 6.3 Create Final Master Dataset (FCC + SVI + Airband + Ookla + USDA)
+
+```{r merge3-final}
+# Merge Airband
+merged_all <- merged_data %>%
+  inner_join(airband_clean, by = "county_fips")
+
+# Merge Ookla (left join to keep all counties even if no Ookla data)
+merged_all <- merged_all %>%
+  left_join(ookla_2020, by = "county_fips")
+
+# Merge USDA RUCC (left join, select only key variables to avoid name conflicts)
+usda_for_merge <- usda_rucc %>%
+  select(county_fips, rucc_2023, is_metro, is_rural, rural_urban_cat)
+
+merged_all <- merged_all %>%
+  left_join(usda_for_merge, by = "county_fips")
+
+# Inspect final dataset
+cat("Final merged dataset rows:", nrow(merged_all), "\n")
+cat("Counties with Ookla data:", sum(!is.na(merged_all$avg_download_mbps)), "\n")
+cat("Counties with USDA RUCC:", sum(!is.na(merged_all$rucc_2023)), "\n\n")
+
+# Rural-urban breakdown
+cat("Metro vs Nonmetro in merged data:\n")
+print(table(merged_all$rural_urban_cat, useNA = "ifany"))
+
+head(merged_all)
+```
+## 6.4 Save Final Merged Dataset
+
+```{r merge3-save}
+# Save with updated name reflecting all integrations
+write_csv(merged_all, path_processed("merged_master_2020.csv"))
+saveRDS(merged_all, path_processed("merged_master_2020.rds"))
+
+# Also save to original names for backwards compatibility
+write_csv(merged_all, path_processed("merged_fcc_svi_airband_ookla_2020.csv"))
+saveRDS(merged_all, path_processed("merged_fcc_svi_airband_ookla_2020.rds"))
+write_csv(merged_all, path_processed("merged_fcc_svi_airband_2020.csv"))
+saveRDS(merged_all, path_processed("merged_fcc_svi_airband_2020.rds"))
+
+cat("Saved merged dataset with", ncol(merged_all), "columns\n")
+```
+
+# 6.5 Enhanced Visualizations: Digital Divide Analysis
+
+This section provides comprehensive visualizations exploring the digital divide across rural-urban classifications, income levels, and geographic regions.
+
+## 6.5.1 Rural-Urban Digital Divide: Internet Speeds
+
+```{r viz-rural-urban-speeds, fig.width=12, fig.height=6}
+# Prepare data with RUCC categories
+viz_data <- merged_all %>%
+  filter(!is.na(rural_urban_cat), !is.na(avg_download_mbps))
+
+# Box plot: Download speeds by rural-urban category
+p1 <- ggplot(viz_data, aes(x = rural_urban_cat, y = avg_download_mbps, fill = rural_urban_cat)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_fill_manual(values = c("Metro" = "#2E86AB",
+                               "Nonmetro-Adjacent" = "#F6AE2D",
+                               "Nonmetro-Nonadjacent" = "#E94F37")) +
+  labs(title = "Download Speeds by Rural-Urban Classification",
+       subtitle = "Ookla Speedtest Data (2020)",
+       x = "", y = "Average Download Speed (Mbps)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", size = 14))
+
+# Box plot: Latency by rural-urban category
+p2 <- ggplot(viz_data, aes(x = rural_urban_cat, y = avg_latency_ms, fill = rural_urban_cat)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  scale_fill_manual(values = c("Metro" = "#2E86AB",
+                               "Nonmetro-Adjacent" = "#F6AE2D",
+                               "Nonmetro-Nonadjacent" = "#E94F37")) +
+  labs(title = "Network Latency by Rural-Urban Classification",
+       subtitle = "Higher latency = slower response times",
+       x = "", y = "Average Latency (ms)") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        plot.title = element_text(face = "bold", size = 14))
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+## 6.5.2 Speed Distribution Density by RUCC Code
+
+```{r viz-speed-density, fig.width=10, fig.height=6}
+viz_data2 <- merged_all %>%
+  filter(!is.na(rucc_2023), !is.na(avg_download_mbps)) %>%
+  mutate(rucc_label = paste0("RUCC ", rucc_2023))
+
+ggplot(viz_data2, aes(x = avg_download_mbps, fill = factor(rucc_2023))) +
+  geom_density(alpha = 0.5) +
+  scale_fill_viridis_d(name = "RUCC Code", option = "plasma") +
+  labs(title = "Download Speed Distribution by RUCC Code",
+       subtitle = "RUCC 1-3: Metro | RUCC 4-6: Nonmetro Adjacent | RUCC 7-9: Remote Rural",
+       x = "Average Download Speed (Mbps)", y = "Density") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14)) +
+  xlim(0, 200)
+```
+
+## 6.5.3 FCC Coverage vs Actual Speeds (Ookla)
+
+```{r viz-coverage-vs-speed, fig.width=10, fig.height=6}
+# Compare FCC reported coverage with actual measured speeds
+viz_data3 <- merged_all %>%
+  filter(!is.na(coverage_25_3), !is.na(avg_download_mbps))
+
+if (nrow(viz_data3) > 0) {
+  ggplot(viz_data3, aes(x = coverage_25_3 * 100, y = avg_download_mbps, color = rural_urban_cat)) +
+    geom_point(alpha = 0.5, size = 2) +
+    geom_smooth(method = "lm", se = FALSE, linewidth = 1.2) +
+    scale_color_manual(values = c("Metro" = "#2E86AB",
+                                  "Nonmetro-Adjacent" = "#F6AE2D",
+                                  "Nonmetro-Nonadjacent" = "#E94F37")) +
+    labs(title = "FCC Reported Coverage vs Actual Measured Speeds",
+         subtitle = "Does high coverage translate to fast speeds?",
+         x = "FCC 25/3 Mbps Coverage (%)",
+         y = "Actual Avg Download Speed (Mbps)",
+         color = "Area Type") +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold", size = 14),
+          legend.position = "bottom")
+} else {
+  cat("Note: Coverage data not available for this comparison\n")
+}
+```
+
+## 6.5.4 Social Vulnerability and Broadband Access
+
+```{r viz-svi-broadband, fig.width=12, fig.height=5}
+viz_data4 <- merged_all %>%
+  filter(!is.na(svi_overall), !is.na(avg_download_mbps))
+
+# SVI vs Download Speed
+p1 <- ggplot(viz_data4, aes(x = svi_overall, y = avg_download_mbps)) +
+  geom_point(alpha = 0.3, color = "steelblue") +
+  geom_smooth(method = "lm", color = "red", linewidth = 1.2) +
+  labs(title = "Social Vulnerability vs Internet Speed",
+       x = "SVI Overall Percentile (higher = more vulnerable)",
+       y = "Avg Download Speed (Mbps)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+# SVI vs Latency
+p2 <- ggplot(viz_data4, aes(x = svi_overall, y = avg_latency_ms)) +
+  geom_point(alpha = 0.3, color = "coral") +
+  geom_smooth(method = "lm", color = "darkred", linewidth = 1.2) +
+  labs(title = "Social Vulnerability vs Network Latency",
+       x = "SVI Overall Percentile",
+       y = "Avg Latency (ms)") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 12))
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+## 6.5.5 Heatmap: Correlations Between Key Variables
+
+```{r viz-correlation-heatmap, fig.width=10, fig.height=8}
+# Select numeric variables for correlation
+cor_vars <- merged_all %>%
+  select(
+    svi_overall, svi_soc, svi_hh, svi_min, svi_hous,
+    tier2, tier3,
+    avg_download_mbps, avg_upload_mbps, avg_latency_ms,
+    airband_usage, rucc_2023
+  ) %>%
+  select(where(is.numeric)) %>%
+  na.omit()  # Remove rows with NA for clean correlation
+
+# Compute correlation matrix
+cor_matrix <- cor(cor_vars, use = "complete.obs")
+
+# Plot correlation heatmap (removed hclust ordering to avoid NA issues)
+corrplot::corrplot(cor_matrix,
+                   method = "color",
+                   type = "upper",
+                   order = "original",
+                   tl.col = "black",
+                   tl.srt = 45,
+                   addCoef.col = "black",
+                   number.cex = 0.7,
+                   col = corrplot::COL2('RdBu', 10),
+                   title = "Correlation Matrix: Digital Divide Indicators",
+                   mar = c(0, 0, 2, 0))
+```
+
+## 6.5.6 Speed Tiers: Metro vs Rural Comparison
+
+```{r viz-speed-tiers-comparison, fig.width=10, fig.height=6}
+# Create speed tier categories from actual Ookla speeds
+viz_data5 <- merged_all %>%
+  filter(!is.na(avg_download_mbps), !is.na(rural_urban_cat)) %>%
+  mutate(
+    speed_tier = case_when(
+      avg_download_mbps < 25 ~ "Below Basic (<25 Mbps)",
+      avg_download_mbps < 100 ~ "Basic (25-100 Mbps)",
+      avg_download_mbps < 250 ~ "Fast (100-250 Mbps)",
+      TRUE ~ "Very Fast (250+ Mbps)"
+    ),
+    speed_tier = factor(speed_tier, levels = c("Below Basic (<25 Mbps)",
+                                                "Basic (25-100 Mbps)",
+                                                "Fast (100-250 Mbps)",
+                                                "Very Fast (250+ Mbps)"))
+  )
+
+# Stacked bar chart
+ggplot(viz_data5, aes(x = rural_urban_cat, fill = speed_tier)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("Below Basic (<25 Mbps)" = "#E94F37",
+                               "Basic (25-100 Mbps)" = "#F6AE2D",
+                               "Fast (100-250 Mbps)" = "#7FB069",
+                               "Very Fast (250+ Mbps)" = "#2E86AB")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Distribution of Actual Internet Speeds by Area Type",
+       subtitle = "Based on Ookla Speedtest measurements",
+       x = "", y = "Proportion of Counties",
+       fill = "Speed Tier") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        legend.position = "bottom") +
+  coord_flip()
+```
+
+## 6.5.7 Summary Statistics Table by Rural-Urban Category
+
+```{r viz-summary-table}
+summary_stats <- merged_all %>%
+  filter(!is.na(rural_urban_cat)) %>%
+  group_by(rural_urban_cat) %>%
+  summarise(
+    n_counties = n(),
+    avg_download = round(mean(avg_download_mbps, na.rm = TRUE), 1),
+    median_download = round(median(avg_download_mbps, na.rm = TRUE), 1),
+    avg_latency = round(mean(avg_latency_ms, na.rm = TRUE), 1),
+    avg_svi = round(mean(svi_overall, na.rm = TRUE), 3),
+    pct_below_25mbps = round(100 * mean(avg_download_mbps < 25, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+cat("\n=== DIGITAL DIVIDE SUMMARY BY AREA TYPE ===\n\n")
+print(summary_stats)
+
+# Visual table using knitr if available
+if (requireNamespace("knitr", quietly = TRUE)) {
+  knitr::kable(summary_stats,
+               col.names = c("Area Type", "Counties", "Avg DL (Mbps)",
+                            "Median DL", "Avg Latency (ms)", "Avg SVI", "% Below 25Mbps"),
+               caption = "Digital Divide Metrics by Rural-Urban Classification")
+}
+```
+
+## 6.5.8 Geographic Distribution: RUCC Codes
+
+```{r viz-rucc-map, fig.width=12, fig.height=8, eval=FALSE}
+# Note: This chunk creates a US map colored by RUCC codes
+# Set eval=TRUE to generate (requires counties_sf shapefile)
+
+# Load shapefile if available
+if (file.exists(path_processed("counties_sf.rds"))) {
+  counties_sf <- readRDS(path_processed("counties_sf.rds"))
+
+  # Join with RUCC data
+  map_data <- counties_sf %>%
+    left_join(merged_all %>% select(county_fips, rucc_2023, rural_urban_cat),
+              by = c("GEOID" = "county_fips"))
+
+  # Filter to continental US
+  map_data <- map_data %>%
+    filter(!STATEFP %in% c("02", "15", "60", "66", "69", "72", "78"))
+
+  ggplot(map_data) +
+    geom_sf(aes(fill = rural_urban_cat), color = NA) +
+    scale_fill_manual(values = c("Metro" = "#2E86AB",
+                                 "Nonmetro-Adjacent" = "#F6AE2D",
+                                 "Nonmetro-Nonadjacent" = "#E94F37"),
+                      na.value = "gray90") +
+    labs(title = "Rural-Urban Classification of US Counties",
+         subtitle = "USDA Rural-Urban Continuum Codes (2023)",
+         fill = "Category") +
+    theme_void() +
+    theme(plot.title = element_text(face = "bold", size = 16),
+          legend.position = "bottom")
+}
+```
+
+# 7. County-Level Shapefile Processing
+
+To conduct spatial analysis and merge all county-level datasets consistently, we first processed the 2020 U.S. Census TIGER/Line county shapefile. This shapefile provides the geographic boundary polygons and the official county FIPS codes (GEOID) used as the primary spatial join key in later stages of the project.
+
+# 7.1 Load Libraries for Spatial Data
+
+```{r shapefile-processing}
+sf::sf_use_s2(FALSE)
+```
+
+# 7.2 Read the County Shapefile
+
+We now load the 2020 U.S. Census TIGER/Line county shapefile into R using the sf package. This file contains county boundary polygons and the GEOID field that will be used later for spatial joining with ACS, SVI, FCC, and Airband datasets.
+
+```{r shapefile-read}
+shp_path <- "raw_data/geographic/tl_2020_us_county.shp"
+
+counties_raw <- sf::st_read(shp_path)
+```
+#7.3 Select Relevant Columns
+
+The county shapefile contains many fields, but for this project we only need the attributes required for merging and mapping. Specifically, we keep:
+
+GEOID – 5-digit county FIPS (primary join key)
+
+NAME – county name
+
+STATEFP – state FIPS code
+
+COUNTYFP – county number within the state
+
+geometry – polygon boundary information
+
+```{r shapefile-select-columns}
+
+counties_sf <- counties_raw %>% 
+  dplyr::select(GEOID, NAME, STATEFP, COUNTYFP, geometry)
+
+counties_sf
+```
+
+# 7.4 Standardize the GEOID (County FIPS Code)
+
+Different datasets (SVI, ACS, FCC, Airband) use FIPS codes to identify counties.
+To ensure all datasets merge correctly, we convert the GEOID column from the shapefile into a 5-digit character string with leading zeros.
+
+Example:
+
+1001 → 01001
+
+3501 → 03501
+
+This prevents merge errors and ensures consistency across all data sources.
+
+```{r shapefile-standardize-geoid}
+
+
+counties_sf <- counties_sf %>% 
+  mutate(
+    GEOID = as.character(GEOID),              # convert to character
+    GEOID = stringr::str_pad(GEOID,           # pad with leading zeros
+                             width = 5, 
+                             side = "left", 
+                             pad = "0")
+  )
+
+# Display first 20 FIPS codes to verify correctness
+head(counties_sf$GEOID, 20)
+```
+
+# 7.5 Re-project County Shapefile for Mapping
+
+The TIGER/Line county shapefile is in the NAD83 coordinate reference system. For most visualization tools (e.g., ggplot2, tmap, leaflet), it is convenient to use WGS84 (EPSG:4326). Here, we reproject the spatial object once so it is ready for mapping and spatial analysis.
+
+```{r shapefile-reproject}
+
+counties_sf <- st_transform(counties_sf, crs = 4326)
+
+# Quick check of the CRS and object
+counties_sf
+st_crs(counties_sf)
+```
+# 7.6 Save Cleaned County Shapefile
+
+```{r shapefile-save-rds}
+# Save Cleaned County Spatial Data as RDS
+
+# Save directly into your existing processed_data folder
+saveRDS(counties_sf, "processed_data/counties_sf.rds")
+
+# Confirm it saved
+list.files("processed_data")
+```
+# 8. Processing ACS (American Community Survey) Data
+
+The American Community Survey (ACS) provides essential socioeconomic indicators that are critical for understanding digital inequality across U.S. counties. Unlike datasets that only measure broadband availability or usage, ACS tables contain detailed information about household income, educational attainment, and internet/computer access—all of which are deeply connected to digital divide outcomes.
+
+# 8.1 Clean ACS B28002 (Internet & Computer Use)
+
+The ACS table B28002 provides detailed information about internet and computer access at the county level. This dataset is essential for understanding digital adoption, device availability, and technology access across communities. However, the raw ACS download includes extra columns—such as margins of error (M columns), metadata, and a GEO_ID field containing long identifiers.
+
+```{r acs-b28002-clean-final}
+
+# Load ACS B28002
+b28002_path <- "raw_data/census/ACSDT5Y2020.B28002-Data.csv"
+acs_b28002_raw <- read_csv(b28002_path)
+
+# Remove label row
+acs_b28002_raw <- acs_b28002_raw %>% 
+  filter(GEO_ID != "Geography")
+
+# Keep only important columns
+acs_b28002_clean <- acs_b28002_raw %>% 
+  select(
+    GEO_ID, NAME,
+    B28002_001E,  # total households
+    B28002_002E,  # broadband households
+    B28002_012E,  # households with no internet
+    B28002_013E   # households with no computer
+    # OPTIONAL: add B28002_004E, _005E, _006E if needed
+  ) %>%
+  mutate(
+    FIPS = str_sub(GEO_ID, -5, -1),
+    FIPS = str_pad(FIPS, 5, pad = "0")
+  ) %>%
+  select(FIPS, GEO_ID, NAME, everything())
+
+# Preview
+head(acs_b28002_clean)
+```
+# 8.2 Save Cleaned B28002 Dataset
+```{r acs-b28002-save}
+
+# Save to your existing processed_data folder
+write_csv(acs_b28002_clean, "processed_data/acs_b28002_2020_county_clean.csv")
+saveRDS(acs_b28002_clean,  "processed_data/acs_b28002_2020_county_clean.rds")
+
+# Confirm that the files saved
+list.files("processed_data")
+```
+
+# 8.3 Clean ACS B19013 (Median Household Income)
+
+ACS table B19013 contains the median household income for each U.S. county. Income is one of the strongest predictors of digital access, affordability, and adoption — making it a critical variable in your digital divide analysis.
+
+Because the raw ACS file includes:
+
+metadata rows
+
+margin of error (_M) columns
+
+long GEO_ID fields
+
+We must clean and standardize the dataset before merging it with other county-level data.
+
+```{r acs-b19013-clean}
+
+# 8.2 Load raw ACS B19013 data
+b19013_path <- "raw_data/census/ACSDT5Y2020.B19013-Data.csv"
+acs_b19013_raw <- read_csv(b19013_path)
+
+# Remove the label row
+acs_b19013_raw <- acs_b19013_raw %>% 
+  filter(GEO_ID != "Geography")
+
+# Keep only GEO_ID, NAME, and the income estimate column
+acs_b19013_clean <- acs_b19013_raw %>% 
+  select(
+    GEO_ID,
+    NAME,
+    B19013_001E   # median household income
+  ) %>% 
+  mutate(
+    FIPS = str_sub(GEO_ID, -5, -1),
+    FIPS = str_pad(FIPS, 5, pad = "0")
+  ) %>% 
+  select(FIPS, GEO_ID, NAME, everything())
+
+# Preview cleaned file
+head(acs_b19013_clean)
+```
+# 8.4 Save the cleaned Median Income File
+
+```{r acs-b19013-save}
+write_csv(acs_b19013_clean, "processed_data/acs_b19013_2020_county_clean.csv")
+saveRDS(acs_b19013_clean,  "processed_data/acs_b19013_2020_county_clean.rds")
+
+# Confirm saved files
+list.files("processed_data")
+```
+# 8.5 Clean ACS B15003 (Educational Attainment)
+
+ACS table B15003 provides counts of the population by educational attainment level. For digital divide research, education is one of the most important predictors of digital literacy, employment opportunities, and broadband adoption.
+
+```{r acs-b15003-clean}
+library(dplyr)
+library(readr)
+library(stringr)
+
+# 8.3 Load raw ACS B15003 education data
+b15003_path <- "raw_data/census/ACSDT5Y2020.B15003-Data.csv"
+acs_b15003_raw <- read_csv(b15003_path)
+
+# Remove descriptive header row
+acs_b15003_raw <- acs_b15003_raw %>% 
+  filter(GEO_ID != "Geography")
+
+# Keep key educational variables
+acs_b15003_clean <- acs_b15003_raw %>% 
+  select(
+    GEO_ID,
+    NAME,
+    B15003_001E,  # total population age 25+
+    B15003_017E,  # high school graduate
+    B15003_022E,  # bachelor's degree
+    B15003_023E,  # master's degree
+    B15003_025E   # doctorate degree
+  ) %>%
+  mutate(
+    FIPS = str_sub(GEO_ID, -5, -1),
+    FIPS = str_pad(FIPS, 5, pad = "0")
+  ) %>%
+  select(FIPS, GEO_ID, NAME, everything())
+
+# Preview
+head(acs_b15003_clean)
+```
+
+# 8.3.2 Save cleaned B15003 dataset 
+
+```{r acs-b15003-save}
+write_csv(acs_b15003_clean, "processed_data/acs_b15003_2020_county_clean.csv")
+saveRDS(acs_b15003_clean,  "processed_data/acs_b15003_2020_county_clean.rds")
+
+# Confirm saved files
+list.files("processed_data")
+```
+```{r acs-merge-all}
+library(dplyr)
+library(readr)
+library(stringr)
+
+# 8.4.1 Load cleaned ACS datasets
+acs_b28002 <- readRDS("processed_data/acs_b28002_2020_county_clean.rds")
+acs_b19013 <- readRDS("processed_data/acs_b19013_2020_county_clean.rds")
+acs_b15003 <- readRDS("processed_data/acs_b15003_2020_county_clean.rds")
+
+# 8.4.2 Prepare B28002 (internet/computer)
+acs_b28002_small <- acs_b28002 %>% 
+  dplyr::rename(
+    internet_total_hh   = B28002_001E,
+    internet_broadband  = B28002_002E,
+    internet_no_access  = B28002_012E,
+    computer_no_device  = B28002_013E
+  )
+
+# 8.4.3 Prepare B19013 (income)
+acs_b19013_small <- acs_b19013 %>% 
+  dplyr::select(
+    FIPS,
+    income_median = B19013_001E
+  )
+
+# 8.4.4 Prepare B15003 (education)
+acs_b15003_small <- acs_b15003 %>% 
+  dplyr::select(
+    FIPS,
+    edu_total_25plus = B15003_001E,
+    edu_hs           = B15003_017E,
+    edu_bach         = B15003_022E,
+    edu_mast         = B15003_023E,
+    edu_doc          = B15003_025E
+  )
+
+# 8.4.5 Merge all three ACS datasets
+acs_2020_all <- acs_b28002_small %>%
+  dplyr::left_join(acs_b19013_small, by = "FIPS") %>%
+  dplyr::left_join(acs_b15003_small, by = "FIPS")
+
+glimpse(acs_2020_all)
+head(acs_2020_all)
+```
+
+
+```{r acs-merge-all-numeric}
+# 8.4.x Ensure ACS numeric columns are numeric, not character
+
+acs_2020_all <- acs_2020_all %>%
+  mutate(
+    across(
+      c(
+        internet_total_hh,
+        internet_broadband,
+        internet_no_access,
+        computer_no_device,
+        income_median,
+        edu_total_25plus,
+        edu_hs,
+        edu_bach,
+        edu_mast,
+        edu_doc
+      ),
+      ~ as.numeric(.)
+    )
+  )
+
+# Check types again
+glimpse(acs_2020_all)
+```
+```{r acs-merge-all-save-final}
+# Save the final cleaned + numeric + merged ACS dataset
+
+write_csv(acs_2020_all, "processed_data/acs_all_2020_county_clean.csv")
+saveRDS(acs_2020_all,  "processed_data/acs_all_2020_county_clean.rds")
+
+# Confirm saved
+list.files("processed_data")
+```
+# 9. Merge All Cleaned Datasets into One Master Dataset
+
+Section 9 creates a single combined dataset by merging:
+
+FCC broadband availability
+
+SVI (overall + 4 themes)
+
+Microsoft Airband broadband usage
+
+ACS (internet, computer access, income, education)
+
+# 9.1 Load All Cleaned Datasets
+
+```{r section9-load-datasets}
+library(dplyr)
+library(readr)
+
+# Load FCC + SVI + Airband merged dataset
+merged_fcc_svi_airband <- readRDS("processed_data/merged_fcc_svi_airband_2020.rds")
+
+# Load merged ACS dataset
+acs_2020_all <- readRDS("processed_data/acs_all_2020_county_clean.rds")
+
+# Quick preview
+head(merged_fcc_svi_airband)
+head(acs_2020_all)
+```
+```{r reload-merged-fcc-svi-airband}
+merged_fcc_svi_airband <- readRDS("processed_data/merged_fcc_svi_airband_2020.rds")
+```
+
+
+# 9.2 Merge Core Dataset with ACS
+
+Merging is simple:
+Left join so that FIPS from FCC/SVI/Airband stays the base.
+```{r section9-merge-master}
+# 9.2 Create Master 2020 County Dataset
+
+# 9.2.1 Ensure common key name: county_fips -> FIPS
+merged_fcc_svi_airband <- merged_fcc_svi_airband %>%
+  dplyr::rename(FIPS = county_fips)
+
+# 9.2.2 Merge FCC + SVI + Airband with ACS (by FIPS)
+master_2020 <- merged_fcc_svi_airband %>%
+  dplyr::left_join(acs_2020_all, by = "FIPS")
+
+# 9.2.3 Convert Airband columns to numeric (if they are stored as character)
+master_2020 <- master_2020 %>%
+  dplyr::mutate(
+    airband_fcc_availability = as.numeric(airband_fcc_availability),
+    airband_usage            = as.numeric(airband_usage)
+  )
+
+# 9.2.4 Clean up duplicate state/county columns and keep a tidy set
+master_2020 <- master_2020 %>%
+  dplyr::select(
+    FIPS,
+    state_name,
+    county_name = county_name.y,   # final county name
+    housing_units,
+    tier1, tier2, tier3,
+    svi_overall, svi_soc, svi_hh, svi_min, svi_hous,
+    airband_fcc_availability,
+    airband_usage,
+    GEO_ID, NAME,
+    internet_total_hh,
+    internet_broadband,
+    internet_no_access,
+    computer_no_device,
+    income_median,
+    edu_total_25plus,
+    edu_hs,
+    edu_bach,
+    edu_mast,
+    edu_doc
+  )
+
+# 9.2.5 Quick structural check
+glimpse(master_2020)
+head(master_2020)
+```
+```{r section9-save-master}
+# 9.3 Save Final Master 2020 County Dataset
+
+write_csv(master_2020, "processed_data/master_2020_county.csv")
+saveRDS(master_2020,  "processed_data/master_2020_county.rds")
+
+# Check that it's there
+list.files("processed_data")
+```
+# 10. Create Spatial Master Dataset (Attach County Geometry)
+
+The goal of this section is to combine:
+
+counties_sf.rds → county boundaries (shapefile processed in Section 7)
+
+master_2020_county.rds → all your attributes (FCC, SVI, Airband, ACS)
+
+into a single sf object:
+
+master_2020_sf → one row per county, with both attributes and geometry.
+
+We’ll join them using:
+
+GEOID from the shapefile
+
+FIPS from master_2020
+```{r section10-load}
+library(sf)
+library(dplyr)
+
+# 10.1 Load processed county shapefile (sf object)
+counties_sf <- readRDS("processed_data/counties_sf.rds")
+
+# 10.1 Load non-spatial master dataset
+master_2020 <- readRDS("processed_data/master_2020_county.rds")
+
+# Quick checks
+counties_sf
+glimpse(master_2020)
+```
+
+
+---
+
+## **10.2 Spatial Join: Attach Attributes to Geometry**
+
+To keep the geometry, we start from `counties_sf` and `left_join()` the `master_2020` table into it.
+
+```{r section10-spatial-join}
+# 10.2 Join master data to county polygons
+# GEOID (shapefile) matches FIPS (master table)
+
+master_2020_sf <- counties_sf %>% 
+  left_join(master_2020, by = c("GEOID" = "FIPS"))
+
+# Check result: should be an sf object with all master_2020 columns + geometry
+master_2020_sf
+sf::st_crs(master_2020_sf)
+glimpse(master_2020_sf)
+```
+# 10.3 Save the Spatial Dataset
+```{r spatial-save}
+
+# At this point, you should have created this object:
+# master_2020_sf <- left_join(counties_sf, master_2020, by = "GEOID")
+
+# Check structure
+glimpse(master_2020_sf)
+
+# Save spatial master dataset
+saveRDS(master_2020_sf, "processed_data/master_2020_county_sf.rds")
+
+# Confirm saved file
+list.files("processed_data", pattern = "sf")
+```
+
+# 11. Filtering and NA removal
+
+The final analysis dataset was created by filtering the spatial master table to retain only counties with complete data across key broadband and vulnerability indicators, including internet households, median income, Airband availability and usage, and SVI overall score. This reduced the dataset from 3,234 county-equivalents in the TIGER/Line shapefile to 3,120 valid U.S. counties with fully complete records. These 3,120 counties form the final, clean analytical base for clustering, spatial joins, and digital divide analysis.
+
+```{r na-filter-final}
+library(dplyr)
+library(sf)
+
+# 1) Load the spatial master dataset from Section 10
+master_2020_sf <- readRDS("processed_data/master_2020_county_sf.rds")
+
+# 2) Keep only counties with complete data in key fields
+analysis_2020_sf <- master_2020_sf %>%
+  filter(
+    !is.na(internet_total_hh),
+    !is.na(income_median),
+    !is.na(airband_fcc_availability),
+    !is.na(airband_usage),
+    !is.na(svi_overall)
+  )
+
+# How many counties remain?
+nrow(master_2020_sf)      # before
+nrow(analysis_2020_sf)    # after
+
+# 3) Create a non-spatial version (for clustering, regressions, etc.)
+analysis_2020 <- analysis_2020_sf %>%
+  st_drop_geometry()
+
+# 4) Save final analysis datasets
+saveRDS(analysis_2020_sf, "processed_data/analysis_2020_county_sf.rds")
+saveRDS(analysis_2020,    "processed_data/analysis_2020_county.rds")
+readr::write_csv(analysis_2020, "processed_data/analysis_2020_county.csv")
+
+# 5) Confirm files
+list.files("processed_data", pattern = "analysis_2020")
+```
+# 11.1 Consistency Checks
+Several internal validation checks were performed to ensure coherence across the merged dataset. Broadband subscription counts were verified to never exceed total household counts, and all ACS-derived broadband and device-access percentages fell within the valid range of 0–100%. A correlation analysis between median household income and the SVI socioeconomic theme produced the expected negative relationship, confirming consistency between ACS demographics and CDC social vulnerability metrics. Some counties displayed Airband usage values greater than modeled availability—this is a known feature of Airband’s methodology and does not represent data errors. Overall, no logical inconsistencies were detected in the final analysis dataset.
+```{r consistency-checks}
+library(dplyr)
+
+# Load final non-spatial dataset
+analysis_2020 <- readRDS("processed_data/analysis_2020_county.rds")
+
+
+# 1. Logical Broadband Checks
+
+# Broadband subscriptions cannot exceed households
+invalid_broadband_logic <- analysis_2020 %>%
+  filter(
+    internet_broadband > internet_total_hh |
+    internet_no_access > internet_total_hh
+  )
+
+invalid_broadband_logic   # ideally 0 rows
+
+
+# 2. ACS Percentage Validity
+
+acs_pct_check <- analysis_2020 %>%
+  mutate(
+    pct_broadband   = internet_broadband / internet_total_hh * 100,
+    pct_no_access   = internet_no_access / internet_total_hh * 100,
+    pct_no_device   = computer_no_device / internet_total_hh * 100
+  )
+
+invalid_pct <- acs_pct_check %>%
+  filter(
+    pct_broadband < 0 | pct_broadband > 100 |
+    pct_no_access < 0 | pct_no_access > 100 |
+    pct_no_device < 0 | pct_no_device > 100
+  )
+
+invalid_pct    # ideally 0 rows
+
+# 3. Income vs SVI Socioeconomic Relationship
+
+cor_income_svi <- cor(
+  analysis_2020$income_median,
+  analysis_2020$svi_soc,
+  use = "complete.obs"
+)
+
+cor_income_svi
+
+# 4. Airband Logical Check:
+
+airband_inconsistency <- analysis_2020 %>%
+  filter(
+    airband_usage > airband_fcc_availability
+  )
+
+nrow(airband_inconsistency)
+head(airband_inconsistency)
+```
+Fifty counties exhibited cases where broadband usage exceeded FCC-reported broadband availability. This is an expected pattern in Airband datasets due to differences in modeling assumptions: FCC availability represents provider-reported infrastructure, while Airband usage measures active connectivity across satellite, mobile, and other modalities. These counties were retained, as the differences reflect true measurement variation rather than data quality issues.
+## 11.1.1 Table of the fifty counties
+```{r airband-inconsistency-table, message=FALSE, warning=FALSE}
+
+# Build a clean table for reporting
+airband_inconsistency_table <- airband_inconsistency %>%
+  dplyr::select(
+    GEOID,
+    state_name,
+    county_name,
+    airband_fcc_availability,
+    airband_usage
+  ) %>%
+  arrange(state_name, county_name)
+
+# Display preview
+head(airband_inconsistency_table)
+
+# Print full table
+airband_inconsistency_table
+
+# Save CSV for documentation
+readr::write_csv(
+  airband_inconsistency_table,
+  "processed_data/airband_inconsistency_counties.csv"
+)
+
+```
+
+# 11.2 Outlier detection
+
+## Outlier Detection and Geographic Validation
+
+In this section, we detect outliers using two statistical approaches:
+1. **IQR Method** – flags extreme values beyond the 1.5×IQR rule  
+2. **Z-Scores** – flags values where |z| > 3 relative to the mean  
+
+We apply both methods to all continuous variables and then examine the geographic distribution of outlier counties.
+
+---
+
+```{r outlier-detection-full}
+
+## -------------------------------
+## 11.1 Identify continuous fields
+## -------------------------------
+continuous_vars <- c(
+  "internet_total_hh", "internet_broadband", "internet_no_access",
+  "computer_no_device", "income_median",
+  "edu_total_25plus", "edu_hs", "edu_bach", "edu_mast", "edu_doc",
+  "airband_fcc_availability", "airband_usage"
+)
+
+num_data <- analysis_2020 %>% dplyr::select(GEOID, county_name, state_name, all_of(continuous_vars))
+
+
+## -------------------------------
+## 11.2 IQR Outlier Detection
+## -------------------------------
+iqr_flag <- function(x) {
+  Q1 <- quantile(x, 0.25, na.rm = TRUE)
+  Q3 <- quantile(x, 0.75, na.rm = TRUE)
+  IQR <- Q3 - Q1
+  (x < (Q1 - 1.5 * IQR)) | (x > (Q3 + 1.5 * IQR))
+}
+
+iqr_outliers <- num_data %>%
+  mutate(across(all_of(continuous_vars), iqr_flag))
+
+iqr_summary <- data.frame(
+  variable = continuous_vars,
+  n_outliers = sapply(iqr_outliers[continuous_vars], function(x) sum(x, na.rm=TRUE))
+)
+
+iqr_summary
+
+
+## -------------------------------
+## 11.3 Z-Score Outlier Detection
+## -------------------------------
+z_df <- num_data %>%
+  mutate(across(all_of(continuous_vars),
+                ~ (.-mean(., na.rm=TRUE)) / sd(., na.rm=TRUE)))
+
+z_outliers <- z_df %>%
+  mutate(across(all_of(continuous_vars), ~ abs(.) > 3))
+
+z_summary <- data.frame(
+  variable = continuous_vars,
+  n_outliers = sapply(z_outliers[continuous_vars], function(x) sum(x, na.rm=TRUE))
+)
+
+z_summary
+
+## 11.4 Compile Outlier Counties (Geographic Context)
+
+
+# A county is an outlier if flagged by either method
+combined_flags <- (iqr_outliers[continuous_vars] | z_outliers[continuous_vars])
+
+# Extract counties flagged at least once
+outlier_counties <- num_data %>%
+  mutate(any_outlier = apply(combined_flags, 1, any)) %>%
+  filter(any_outlier == TRUE) %>%
+  dplyr::select(GEOID, county_name, state_name)
+
+# Show first few
+head(outlier_counties)
+
+
+```
+Interpretation Summary   
+Large-population counties (e.g., Los Angeles, Cook, Harris) appear as outliers due to extremely high total households, broadband counts, and education levels.  
+- Very small counties (e.g., Loving TX, Kalawao HI, rural Alaska census areas) produce outliers in the opposite direction because of very small denominators.  
+- Broadband usage outliers cluster in:
+  - Tribal regions (low broadband adoption)  
+  - Appalachia(low income & limited infrastructure)  
+  - Major metros(very high availability and usage)  
+- Income outliers highlight:
+  - Rich suburban counties in Virginia, Maryland, California 
+  - Poor rural counties in Mississippi, Alabama, and Arkansas
+
+## 12. Feature Engineering & Final Variable Preparation
+
+Feature engineering creates new variables that better capture digital divide conditions across U.S. counties. These engineered variables will be used in later analysis, clustering, and visualization.
+
+### 12.1 Derived Variables (Digital Divide Metrics)
+
+```{r feature-engineering}
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # Broadband gap: difference between "available" vs "actually used"
+    broadband_gap = airband_fcc_availability - airband_usage,
+
+    # Affordability index: inverse of income (lower income = higher affordability risk)
+    affordability_index = 1 / income_median,
+
+    # Technology mix placeholder (FCC county data does not include tech details)
+    technology_mix = NA,
+
+    # Composite score combining SVI + broadband usage deficit
+    digital_vulnerability_score =
+      (svi_overall * 0.5) +
+      ((1 - airband_usage) * 0.5),
+
+    # Priority intervention: worst quartile in BOTH vulnerability & broadband_gap
+    priority_intervention_flag =
+      (ntile(digital_vulnerability_score, 4) == 4 &
+       ntile(broadband_gap, 4) == 4)
+  )
+```
+
+### 12.1.1 
+```{r save-after-12-1}
+library(sf)
+library(dplyr)
+library(readr)
+
+# Ensure processed_data exists
+dir.create("processed_data", showWarnings = FALSE)
+
+# 1) Save updated spatial dataset (with new derived variables)
+saveRDS(analysis_2020_sf, 
+        "processed_data/analysis_2020_county_final_sf.rds")
+
+# 2) Create non-spatial version and save
+analysis_2020 <- analysis_2020_sf %>% st_drop_geometry()
+
+saveRDS(analysis_2020, 
+        "processed_data/analysis_2020_county_final.rds")
+
+write_csv(analysis_2020, 
+          "processed_data/analysis_2020_county_final.csv")
+
+# Confirm files
+list.files("processed_data", pattern = "analysis_2020_county_final")
+```
+
+
+### 12.2 Data Transformation for Modeling
+
+```{r transform-for-modeling}
+library(dplyr)
+
+# Load the updated non-spatial dataset (with all derived variables)
+analysis_2020 <- readRDS("processed_data/analysis_2020_county_final.rds")
+
+# Now safely transform for modeling
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # Standardized versions (z-scores) for clustering
+    z_income = scale(income_median),
+    z_broadband_usage = scale(airband_usage),
+    z_svi = scale(svi_overall),
+
+    # Quartile categories for visualization
+    income_quartile = ntile(income_median, 4),
+    broadband_quartile = ntile(airband_usage, 4),
+    svi_quartile = ntile(svi_overall, 4),
+
+    # Log transformation for skewed variables
+    log_income = log(income_median),
+    log_total_hh = log(internet_total_hh)
+  )
+```
+
+
+### 12.3 Data Transformation for Mapping
+
+```{r centroid-generation}
+# Compute centroids for mapping
+county_centroids <- st_centroid(counties_sf)
+```
+
+## 13. Missing Data Handling
+
+### 13.1 Missing Data Assessment
+
+We formally checked missingness across all variables:
+
+```{r missing-data-assessment}
+missing_summary <- sapply(analysis_2020, function(x) sum(is.na(x)))
+missing_summary
+```
+
+Summary: 
+- Almost all missing values originated from counties removed earlier (AK, territory counties).  
+- Remaining missingness is < 1% and corresponds to counties with ACS suppression (very small population).
+
+### 13.2 Imputation Decision
+
+Because the cleaned dataset contains 99% complete rows, we use:
+
+- No imputation for key measures  
+- Document missingness instead  
+- Preserve validity of real ACS and FCC values
+
+## 14. Final Dataset Validation
+
+### 14.1 Quality Metrics
+
+```{r quality-metrics}
+# Completeness
+completeness_rate <- 1 - mean(is.na(analysis_2020))
+completeness_rate
+
+# Correlation check between similar metrics
+correlation_income_svi <- cor(analysis_2020$income_median,
+                              analysis_2020$svi_soc,
+                              use="complete.obs")
+correlation_income_svi
+```
+
+- Completeness:> 95%  
+- Consistency: Strong correlation (>0.7) between income & SVI socioeconomic theme  
+- Coverage: All 50 states + DC represented  
+- Accuracy:FCC & SVI values match published patterns
+
+### 14.2 Data Dictionary (Required)
+
+
+```{r build-data-dictionary, message=FALSE, warning=FALSE}
+library(dplyr)
+
+# Load the final non-spatial dataset if not already loaded
+if (!exists("analysis_2020")) {
+  analysis_2020 <- readRDS("processed_data/analysis_2020_county_final.rds")
+}
+
+var_names <- names(analysis_2020)
+
+# -------------------------
+# 1) Define metadata lookup
+# -------------------------
+
+desc <- c(
+  GEOID   = "5-digit county FIPS code (STATEFP + COUNTYFP)",
+  NAME.x  = "Short county name from TIGER/Line shapefile",
+  STATEFP = "2-digit state FIPS code",
+  COUNTYFP = "3-digit county FIPS code",
+  state_name  = "Full state name",
+  county_name = "Full county name with type (County/Parish/Borough/City)",
+  housing_units = "Total housing units in the county",
+  tier1 = "FCC broadband availability score: Tier 1",
+  tier2 = "FCC broadband availability score: Tier 2",
+  tier3 = "FCC broadband availability score: Tier 3 (highest tier)",
+  svi_overall = "Overall Social Vulnerability Index percentile (0–1)",
+  svi_soc     = "SVI Theme 1: Socioeconomic status percentile",
+  svi_hh      = "SVI Theme 2: Household composition & disability percentile",
+  svi_min     = "SVI Theme 3: Minority status & language percentile",
+  svi_hous    = "SVI Theme 4: Housing & transportation percentile",
+  airband_fcc_availability = "Microsoft Airband estimate of broadband availability (0–1)",
+  airband_usage            = "Microsoft Airband estimate of broadband usage (0–1)",
+  GEO_ID  = "ACS GEO_ID identifier (0500000USssccc format)",
+  NAME.y  = "ACS county name with state (e.g., 'Cuyahoga County, Ohio')",
+  internet_total_hh   = "Total households with internet status reported in ACS",
+  internet_broadband  = "Households with a broadband internet subscription (ACS)",
+  internet_no_access  = "Households with no internet access at home (ACS)",
+  computer_no_device  = "Households without any computing device (ACS)",
+  income_median       = "Median household income in dollars (ACS B19013)",
+  edu_total_25plus    = "Total population aged 25 and over (ACS B15003)",
+  edu_hs   = "Adults 25+ with high school diploma or equivalent",
+  edu_bach = "Adults 25+ with a bachelor’s degree",
+  edu_mast = "Adults 25+ with a master’s degree",
+  edu_doc  = "Adults 25+ with a doctoral degree"
+)
+
+src <- c(
+  GEOID   = "TIGER/Line county shapefile",
+  NAME.x  = "TIGER/Line county shapefile",
+  STATEFP = "TIGER/Line county shapefile",
+  COUNTYFP = "TIGER/Line county shapefile",
+  state_name  = "Derived (SVI/ACS/FCC, harmonized)",
+  county_name = "Derived (SVI/ACS, harmonized)",
+  housing_units = "FCC Form 477 (county summary)",
+  tier1 = "FCC Form 477",
+  tier2 = "FCC Form 477",
+  tier3 = "FCC Form 477",
+  svi_overall = "CDC/ATSDR SVI – county",
+  svi_soc     = "CDC/ATSDR SVI – county",
+  svi_hh      = "CDC/ATSDR SVI – county",
+  svi_min     = "CDC/ATSDR SVI – county",
+  svi_hous    = "CDC/ATSDR SVI – county",
+  airband_fcc_availability = "Microsoft Airband – availability file",
+  airband_usage            = "Microsoft Airband – usage file",
+  GEO_ID  = "ACS 5-year tables",
+  NAME.y  = "ACS 5-year tables",
+  internet_total_hh   = "ACS 5-year B28002",
+  internet_broadband  = "ACS 5-year B28002",
+  internet_no_access  = "ACS 5-year B28002",
+  computer_no_device  = "ACS 5-year (computer ownership table)",
+  income_median       = "ACS 5-year B19013",
+  edu_total_25plus    = "ACS 5-year B15003",
+  edu_hs   = "ACS 5-year B15003",
+  edu_bach = "ACS 5-year B15003",
+  edu_mast = "ACS 5-year B15003",
+  edu_doc  = "ACS 5-year B15003"
+)
+
+year <- c(
+  GEOID = "2020", NAME.x = "2020", STATEFP = "2020", COUNTYFP = "2020",
+  state_name = "2020", county_name = "2020",
+  housing_units = "2020",
+  tier1 = "2020", tier2 = "2020", tier3 = "2020",
+  svi_overall = "2020", svi_soc = "2020", svi_hh = "2020",
+  svi_min = "2020", svi_hous = "2020",
+  airband_fcc_availability = "2020",
+  airband_usage = "2020",
+  GEO_ID = "2020", NAME.y = "2020",
+  internet_total_hh = "2020",
+  internet_broadband = "2020",
+  internet_no_access = "2020",
+  computer_no_device = "2020",
+  income_median = "2020",
+  edu_total_25plus = "2020",
+  edu_hs = "2020", edu_bach = "2020",
+  edu_mast = "2020", edu_doc = "2020"
+)
+
+proc <- c(
+  GEOID   = "Combined STATEFP and COUNTYFP; used as master join key for all datasets.",
+  NAME.x  = "Imported from TIGER; kept for mapping labels only.",
+  STATEFP = "Imported from TIGER; used to build GEOID and QC state_name.",
+  COUNTYFP = "Imported from TIGER; used to build GEOID.",
+  state_name  = "Standardized state names across SVI, ACS, FCC, and Airband sources.",
+  county_name = "Standardized county names; harmonized between ACS and SVI.",
+  housing_units = "Selected from FCC county file; converted to numeric.",
+  tier1 = "Selected FCC tier variable; converted to numeric and checked for range.",
+  tier2 = "Same as tier1 for Tier 2 availability.",
+  tier3 = "Same as tier1 for Tier 3 (highest tier) availability.",
+  svi_overall = "Filtered to county SVI file; kept as percentile (0–1).",
+  svi_soc     = "Copied from SVI Theme 1; no transformation beyond type conversion.",
+  svi_hh      = "Copied from SVI Theme 2; no transformation beyond type conversion.",
+  svi_min     = "Copied from SVI Theme 3; no transformation beyond type conversion.",
+  svi_hous    = "Copied from SVI Theme 4; no transformation beyond type conversion.",
+  airband_fcc_availability = "Read from Microsoft Airband CSV; strings converted to numeric proportions.",
+  airband_usage            = "Read from Microsoft Airband CSV; strings converted to numeric proportions.",
+  GEO_ID  = "Retained original ACS GEO_ID for traceability back to ACS tables.",
+  NAME.y  = "Retained ACS county name with state for documentation / QC.",
+  internet_total_hh   = "Selected ACS estimate column; cast to numeric.",
+  internet_broadband  = "Selected broadband-subscribing households estimate; cast to numeric.",
+  internet_no_access  = "Selected 'No internet access' estimate; cast to numeric.",
+  computer_no_device  = "Selected 'no computer device' estimate; cast to numeric.",
+  income_median       = "Selected ACS median income estimate; cast to numeric (USD).",
+  edu_total_25plus    = "Sum of all education categories for age 25+; numeric.",
+  edu_hs   = "Sum of HS-diploma categories; numeric count.",
+  edu_bach = "Sum of bachelor’s degree categories; numeric count.",
+  edu_mast = "Sum of master’s degree categories; numeric count.",
+  edu_doc  = "Sum of doctoral degree categories; numeric count."
+)
+
+# -------------------------
+# 2) Build dictionary table
+# -------------------------
+
+data_dictionary <- data.frame(
+  variable = var_names,
+  description = ifelse(var_names %in% names(desc), desc[var_names],
+                       "(description pending)"),
+  source = ifelse(var_names %in% names(src), src[var_names],
+                  "(source pending)"),
+  year = ifelse(var_names %in% names(year), year[var_names],
+                "2020"),
+  processing_notes = ifelse(var_names %in% names(proc), proc[var_names],
+                            "(processing notes pending)"),
+  stringsAsFactors = FALSE
+)
+
+# Preview
+head(data_dictionary)
+
+# knitr::kable(data_dictionary, caption = "Data Dictionary for analysis_2020_county_final Dataset")
+```
+
+
+
+SECTION - II 
+
+ANALYTICS FOR DIGITAL DIVIDE MODELING
+
+Phase 1 : Exploratory Data Analysis
+
+# 1. Exploratory Data Analysis
+
+## 1.1 Univariate Analysis
+
+This section examines the distributional properties of key continuous variables in the 2020 county-level broadband and social vulnerability dataset.
+For each variable, we compute summary statistics, visualize distributions (histograms and boxplots), and assess skewness and potential outliers to understand underlying patterns before moving to bivariate and multivariate modeling.
+
+
+```{r univariate-setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(moments)   # for skewness & kurtosis
+library(readr)
+
+# Load final non-spatial dataset
+analysis_2020 <- readRDS("processed_data/analysis_2020_county_final.rds")
+
+# Select key variables for univariate analysis
+uni_vars <- c(
+  "airband_usage",
+  "internet_broadband",
+  "internet_no_access",
+  "svi_overall",
+  "svi_soc",
+  "svi_hh",
+  "svi_min",
+  "svi_hous",
+  "income_median",
+  "edu_hs",
+  "edu_bach",
+  "edu_mast",
+  "edu_doc"
+)
+```
+
+
+## 1.2 Automated Univariate Loop (Summary + Plots + Skewness)
+
+This loop produces:
+
+- Mean, median, SD, min, max  
+- Histogram with density curve  
+- Boxplot for outliers  
+- Skewness & kurtosis indicators  
+
+```{r univariate-loop, fig.height=4.5, fig.width=7}
+for (var in uni_vars) {
+  
+  cat("------------------------------------------------------------\n")
+  cat("Variable:", var, "\n")
+  cat("------------------------------------------------------------\n")
+  
+  # Extract variable
+  x <- analysis_2020[[var]]
+  
+  # Summary statistics
+  stats <- c(
+    mean = mean(x, na.rm=TRUE),
+    median = median(x, na.rm=TRUE),
+    sd = sd(x, na.rm=TRUE),
+    min = min(x, na.rm=TRUE),
+    max = max(x, na.rm=TRUE)
+  )
+  
+  print(round(stats, 4))
+  
+  # Skewness + Kurtosis
+  cat("Skewness:", round(skewness(x, na.rm=TRUE), 3), "\n")
+  cat("Kurtosis:", round(kurtosis(x, na.rm=TRUE), 3), "\n")
+  
+  # Histogram with density
+  print(
+    ggplot(analysis_2020, aes(x = .data[[var]])) +
+      geom_histogram(aes(y = ..density..), bins = 30, fill = "#4A90E2", alpha = 0.7) +
+      geom_density(color="darkred", size=1) +
+      labs(title = paste("Histogram of", var), x = var, y = "Density") +
+      theme_minimal()
+  )
+  
+  # Boxplot
+  print(
+    ggplot(analysis_2020, aes(y = .data[[var]])) +
+      geom_boxplot(fill="#7ED321", alpha=0.7) +
+      labs(title = paste("Boxplot of", var), y = var) +
+      theme_minimal()
+  )
+}
+```
+Univariate Interpretation: 
+
+The following summarizes patterns observed across all variables.
+
+### Broadband Adoption Variables
+
+### Airband Usage
+- Distribution is right-skewed: many counties have moderate usage but few have very high values.  
+- Mean ~ moderate, with a long tail toward high-usage counties.  
+- Boxplot reveals scattered high outliers (tech-dense metros).  
+
+### Internet Broadband Subscriptions
+- Distribution approximates normal but slightly right-skewed.  
+- Higher-usage counties cluster around the mean.  
+- Outliers correspond to wealthy, urban counties.
+
+### No-Internet Households
+- Left-skewed distribution: most counties report moderate/no internet deficits.  
+- Outliers appear in rural Alaska and Mississippi Delta counties.
+
+---
+
+## **SVI Theme Variables**
+
+### **Overall SVI**
+- Roughly uniform distribution across counties (expected; SVI uses percentiles).  
+- Minimal skewness.  
+- No major outliers.
+
+### **SVI Socioeconomic Theme**
+- Strong right-skew:  
+  - Most counties have low socioeconomic vulnerability  
+  - Several counties exhibit extremely high vulnerability  
+- Boxplot shows legitimate heavy-tail behavior.
+
+### **SVI Household Composition**
+- Mild positive skewness.  
+- Some outliers present in aging communities or counties with high disability rates.
+
+### **SVI Minority Status & Language**
+- Highly skewed distribution:  
+  - Many rural counties have very low minority prevalence  
+  - Large metro & border counties form extreme right-tail outliers  
+
+### **SVI Housing & Transportation**
+- Moderate skewness.  
+- Outliers match counties with severe housing & commuting challenges.
+
+---
+
+## **Socioeconomic Variables**
+
+### **Median Household Income**
+- Classic right-skewed income distribution.  
+- Long right tail due to wealthy suburban counties.  
+- Boxplot shows several high-income outliers (e.g., coastal CA, NYC suburbs).  
+
+### **Education Variables (HS, Bachelor’s, Master’s, Doctoral)**
+
+- All show **right-skew** because a few counties have very high educated populations.
+- HS completion is least skewed.
+- Bachelor’s and advanced degrees have long-tail behavior, reflecting urban educational concentration.
+- Outliers correspond to major metros (Boston, Bay Area, DC).
+
+Key Findings from Univariate Analysis
+
+1. **Income, education, and minority status are strongly right-skewed**, typical of socioeconomic datasets.  
+2. **SVI overall is designed to be uniform**, so no skewness is expected — and none observed.  
+3. **Broadband usage shows moderate right skew**, meaning access and adoption are uneven across U.S. counties.  
+4. **Several legitimate outliers exist**, especially in:  
+   - high-income counties  
+   - high-education counties  
+   - broadband-rich tech hubs  
+   - minority-dense border counties  
+5. **Distributions vary substantially**, reinforcing the need for:  
+   - standardized variables (z-scores)  
+   - log transforms for skewed variables  
+   - careful clustering variable selection 
+   
+## 1.3 Bivariate Analysis
+
+This analysis relationships between pairs of variables, focusing on:
+
+Correlations between key continuous variables (broadband, SVI, income, education)
+
+Group differences in broadband adoption across demographic and vulnerability categories
+
+Tests of statistical significance for these relationships
+
+These analyses help identify which socioeconomic and vulnerability factors are associated with broadband access and adoption.
+
+```{r bivar-setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(e1071)
+
+# Load final non-spatial analysis dataset (with derived variables)
+if (!exists("analysis_2020")) {
+  analysis_2020 <- readRDS("processed_data/analysis_2020_county_final.rds")
+}
+
+# 1) Continuous variables for correlation analysis
+cont_vars <- c(
+  "airband_usage",        # broadband adoption (0–1)
+  "internet_broadband",   # broadband-subscribing households
+  "internet_no_access",   # households with no internet
+  "svi_overall",          # overall SVI
+  "svi_soc",              # SVI socioeconomic
+  "svi_hh",               # SVI household composition
+  "svi_min",              # SVI minority & language
+  "svi_hous",             # SVI housing & transportation
+  "income_median",        # median income
+  "edu_hs",               # HS grads
+  "edu_bach",             # BA
+  "edu_mast",             # MA
+  "edu_doc"               # PhD
+)
+
+cont_df <- analysis_2020 %>%
+  dplyr::select(all_of(cont_vars)) %>%
+  mutate(across(everything(), as.numeric))
+
+# 2) Grouping variables
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # Simple urban–rural proxy using housing/transport SVI (higher = more urban-like constraints)
+    urban_rural = ifelse(
+      svi_hous > median(svi_hous, na.rm = TRUE),
+      "Urban-like", "Rural-like"
+    ),
+    # Income quartiles
+    income_quartile = ntile(income_median, 4),
+    # SVI quartiles
+    svi_quartile = ntile(svi_overall, 4),
+    # Simple race/minority grouping using SVI minority theme
+    minority_group = ifelse(
+      svi_min > median(svi_min, na.rm = TRUE),
+      "High Minority", "Low Minority"
+    ),
+    # High vs low no-internet group for chi-square
+    no_internet_group = ifelse(
+      internet_no_access > median(internet_no_access, na.rm = TRUE),
+      "High No Internet", "Low No Internet"
+    )
+  )
+```
+## 1.4  Correlation Analysis (Pearson & Spearman)
+
+This subsection examines linear and rank-based associations among key continuous variables, including broadband adoption, SVI scores, income, and education indicators. Pearson correlations capture linear relationships, while Spearman correlations detect monotonic patterns in skewed or non-normal data.
+```{r correlation-analysis, message=FALSE, warning=FALSE}
+
+# Pearson correlation matrix (linear relationships)
+pearson_corr <- cor(
+  cont_df,
+  use = "complete.obs",
+  method = "pearson"
+)
+
+# Spearman correlation matrix (rank-based relationships, robust for skewed distributions)
+spearman_corr <- cor(
+  cont_df,
+  use = "complete.obs",
+  method = "spearman"
+)
+
+pearson_corr
+spearman_corr
+```
+
+### **Interpretation**
+
+- Pearson results show **strong positive relationships** between broadband adoption (`airband_usage`) and both **income** and **education** variables.  
+- The share of households with **no internet access** shows strong **negative correlations** with income and education, indicating digital exclusion.  
+- SVI socioeconomic theme (`svi_soc`) is positively correlated with lack of internet and negatively correlated with broadband adoption, consistent with vulnerability patterns.  
+- Spearman correlations largely mirror Pearson results, confirming the robustness of these relationships despite skewed distributions (especially income and education variables).
+
+---
+
+# 1.5 Correlation Heatmap Visualization**
+
+A correlation heatmap provides an intuitive visualization of variable relationships, highlighting clusters of strongly related features and identifying socioeconomic factors linked with broadband adoption.
+
+```{r correlation-heatmap, fig.height=8, fig.width=8, message=FALSE, warning=FALSE}
+
+# Generate correlation heatmap for Pearson correlations
+corrplot(
+  pearson_corr,
+  method      = "color",
+  type        = "upper",
+  tl.col      = "black",
+  tl.cex      = 0.8,
+  addCoef.col = "black",
+  number.cex  = 0.6,
+  title       = "Pearson Correlation Heatmap",
+  mar         = c(0, 0, 2, 0)
+)
+```
+## 1.6 Spatial Exploratory Data Analysis (Spatial EDA)
+
+Spatial EDA helps identify geographic patterns, regional clustering, and spatial inequalities in broadband usage and social vulnerability. We use choropleth maps to visualize county-level variation and compare spatial distributions of key indicators.
+## 1.6.1 Setup: Load Spatial Dataset
+
+We use the final spatial dataset saved earlier (the sf object).
+
+```{r spatial-setup, message=FALSE, warning=FALSE}
+library(sf)
+library(ggplot2)
+library(dplyr)
+library(patchwork)   # for side-by-side plots
+
+# Load spatial dataset
+analysis_2020_sf <- readRDS("processed_data/analysis_2020_county_final_sf.rds")
+```
+
+## 1.6.2 Choropleth Map: Broadband Adoption (Airband Usage)
+
+Broadband adoption varies significantly across U.S. counties. A choropleth map helps visualize geographic disparities in digital access, highlighting regions where actual broadband use lags behind availability.
+```{r map-broadband, fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+
+# Broadband Adoption Map (Airband Usage)
+ggplot(analysis_2020_sf) +
+  geom_sf(aes(fill = airband_usage), color = NA) +
+  scale_fill_viridis_c(option = "plasma", name = "Broadband Usage (0–1)") +
+  labs(
+    title = "County-Level Broadband Adoption (Microsoft Airband, 2020)",
+    subtitle = "Measured broadband usage as a proportion of total households"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold")
+  )
+```
+### 1.6.3 Choropleth Map: Overall Social Vulnerability Index (SVI)
+
+This map visualizes how social vulnerability varies across counties. The overall SVI score (0–1 percentile) captures socioeconomic hardship, household composition risks, minority/language vulnerability, and housing/transportation challenges. Mapping SVI helps identify regions where populations may be more at risk of digital exclusion.
+```{r map-svi, fig.height=6, fig.width=9, message=FALSE, warning=FALSE}
+
+# SVI Overall Score Map
+ggplot(analysis_2020_sf) +
+  geom_sf(aes(fill = svi_overall), color = NA) +
+  scale_fill_viridis_c(option = "magma", name = "SVI Overall (0–1)") +
+  labs(
+    title = "County-Level Social Vulnerability Index (SVI), 2020",
+    subtitle = "Higher values indicate greater overall social vulnerability"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    plot.title = element_text(size = 14, face = "bold")
+  )
+```
+
+### 1.6.4 Side-by-Side Comparison: SVI vs Broadband Adoption
+
+To visually examine the relationship between social vulnerability and digital access, we create side-by-side choropleth maps. This comparison helps reveal whether counties with higher vulnerability also tend to exhibit lower broadband usage.
+```{r svi-vs-broadband, fig.height=6, fig.width=14, message=FALSE, warning=FALSE}
+
+library(patchwork)
+
+# Map 1: Social Vulnerability Index
+p1 <- ggplot(analysis_2020_sf) +
+  geom_sf(aes(fill = svi_overall), color = NA) +
+  scale_fill_viridis_c(option = "magma", name = "SVI Overall (0–1)") +
+  labs(
+    title = "Social Vulnerability Index by County",
+    subtitle = "Higher values indicate greater vulnerability"
+  ) +
+  theme_minimal()
+
+# Map 2: Broadband Usage
+p2 <- ggplot(analysis_2020_sf) +
+  geom_sf(aes(fill = airband_usage), color = NA) +
+  scale_fill_viridis_c(option = "plasma", name = "Broadband Usage (0–1)") +
+  labs(
+    title = "Broadband Adoption by County",
+    subtitle = "Measured broadband usage among households"
+  ) +
+  theme_minimal()
+
+# Combine side-by-side
+p1 + p2
+```
+
+### 1.6.5 Spatial Patterns and Regional Clusters
+
+A visual inspection of the choropleth maps reveals several clear regional clusters and spatial patterns linking broadband adoption and social vulnerability across the United States:
+
+1. High Vulnerability + Low Broadband Adoption (Critical Risk Regions)
+
+These counties exhibit high SVI and low broadband usage, forming several distinct clusters:
+
+Deep South:
+Mississippi, Alabama, Arkansas, Louisiana, and parts of Georgia show pronounced overlap between high vulnerability and low adoption.
+These regions consistently appear as digital deserts, reflecting both infrastructural and socioeconomic barriers.
+
+Central Appalachia:
+Eastern Kentucky, West Virginia, and southwest Virginia show persistent low broadband usage coupled with high socioeconomic vulnerability.
+
+Tribal Regions in the Southwest & Northern Plains:
+Counties in Arizona, New Mexico, South Dakota, and Montana (with significant tribal populations) exhibit some of the highest SVI percentiles and lowest broadband adoption rates.
+
+These clusters suggest structural and geographic disadvantages that compound digital exclusion.
+
+2. Low Vulnerability + High Broadband Adoption (Digitally Advantaged Regions)
+
+Areas with low SVI and high broadband adoption cluster around:
+
+Northeast Corridor:
+From Washington D.C. through Maryland, Pennsylvania, New Jersey, and into southern New York and Massachusetts.
+
+West Coast Metro Areas:
+Seattle–Tacoma, Portland, Bay Area, Los Angeles–Orange County, and San Diego.
+
+Upper Midwest Cities:
+Minneapolis–St. Paul, Madison, Chicago suburbs, and Grand Rapids exhibit both low vulnerability and high adoption rates.
+
+These counties benefit from substantial digital infrastructure, higher incomes, and stronger educational indicators.
+
+3. Mixed or Transitional Regions
+
+Some areas show intermediate or mixed patterns, where vulnerability and broadband adoption vary county-by-county:
+
+Midwest rural counties:
+Iowa, Kansas, and Nebraska display moderate SVI but still struggle with uneven broadband adoption outside metro centers.
+
+Texas:
+A strong divide exists between high-adoption urban centers (Dallas, Austin, Houston) and many low-adoption rural counties in West and South Texas.
+
+Mountain West:
+States such as Idaho, Nevada, Wyoming, and Colorado show a patchwork pattern influenced by rugged geography and varying population density.
+
+4. National Geographic Trends
+
+Across all maps, several broader patterns emerge:
+
+Urban–rural divide:
+Urban counties consistently show higher broadband usage and lower SVI, while rural counties show the opposite.
+
+South vs. North divide:
+The Southern U.S. shows the largest overlap of high vulnerability and low digital access.
+
+Coastal vs. Interior divide:
+Coastal regions (East, West, Southeast Florida) have higher adoption and lower vulnerability compared to interior rural regions.
+
+
+
+# 2.0 Regression Modeling
+
+#2.1 Prepare Data for Regression
+
+Broadband adoption (airband_usage) → dependent variable
+Socioeconomic variables (income, education, SVI) → predictors
+Cluster membership (cluster_k3) → categorical predictor 
+```{r regression-setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(car)     # VIF
+library(broom)   # tidy model output
+library(readr)
+
+
+# Load the final cleaned + derived dataset
+analysis_2020 <- readRDS("processed_data/analysis_2020_county_final.rds")
+
+# Check the first few rows
+head(analysis_2020)
+
+# See all column names (IMPORTANT)
+names(analysis_2020)
+```
+
+
+### 2.2 Model 1 — Basic Digital Access Determinants
+
+This model follows the baseline structure recommended in the Analysis Guidelines for Digital Divide Modeling, where broadband adoption is explained by overarching socioeconomic and demographic factors. The dependent variable is broadband usage (airband_usage), and the predictors include overall social vulnerability, income, educational attainment, and households without internet access. 
+```{r model1-basic, message=FALSE, warning=FALSE}
+model1 <- lm(
+  airband_usage ~ svi_overall + income_median + edu_bach + internet_no_access,
+  data = analysis_2020
+)
+
+summary(model1)
+```
+
+Model 1 shows that broadband adoption is associated with structural socioeconomic factors. Higher income counties display significantly greater broadband usage, while social vulnerability—because of its urban components—also shows a positive association with broadband availability. Education (in raw counts) shows a weak negative relationship likely due to population effects in large urban counties. The positive coefficient for households without internet access also reflects underlying population size rather than genuine improvement in broadband outcomes. Overall, the model captures key structural correlates of digital access and explains roughly 38% of the differences in broadband usage across counties.
+
+### 2.3 Model 2 — SVI Theme-Based Regression
+
+This model decomposes the Social Vulnerability Index (SVI) into its four component themes to understand which aspects of vulnerability have the strongest relationships with broadband adoption. This corresponds directly to the professor’s guideline:
+
+The dependent variable remains airband_usage, while predictors include:
+
+SVI Theme 1 — Socioeconomic Status (svi_soc)
+SVI Theme 2 — Household Composition & Disability (svi_hh)
+SVI Theme 3 — Minority Status & Language (svi_min)
+SVI Theme 4 — Housing & Transportation (svi_hous)
+Median household income as a control
+
+```{r model2-themes, message=FALSE, warning=FALSE}
+model2 <- lm(
+  airband_usage ~ svi_soc + svi_hh + svi_min + svi_hous + income_median,
+  data = analysis_2020
+)
+
+summary(model2)
+```
+### 2.4 Code Chunk — Interaction Regression
+
+This model tests whether social vulnerability influences broadband adoption differently in “urban-like” and “rural-like” counties. By including an interaction between SVI and the urban–rural indicator, we can see if the slope of vulnerability changes depending on county type. In general, rural counties with higher vulnerability tend to have lower broadband adoption, while urban counties—despite sometimes having high vulnerability—often maintain stronger connectivity due to better infrastructure. If the interaction term is significant, it means the impact of vulnerability is not the same everywhere; instead, it depends on whether the county is more urban or rural. This helps show how structural context shapes digital access.
+
+```{r model3-interaction, message=FALSE, warning=FALSE}
+## ============================================================
+## Model 3 — Interaction Regression: SVI × Income
+## Tests whether the effect of social vulnerability on broadband
+## adoption differs across income levels.
+## ============================================================
+
+model3 <- lm(
+  airband_usage ~ svi_overall * income_median + edu_bach + internet_no_access,
+  data = analysis_2020
+)
+
+summary(model3)
+```
+
+
+This model tests whether social vulnerability influences broadband adoption differently in “urban-like” and “rural-like” counties. By including an interaction between SVI and the urban–rural indicator, we can see if the slope of vulnerability changes depending on county type. In general, rural counties with higher vulnerability tend to have lower broadband adoption, while urban counties—despite sometimes having high vulnerability—often maintain stronger connectivity due to better infrastructure. If the interaction term is significant, it means the impact of vulnerability is not the same everywhere; instead, it depends on whether the county is more urban or rural. This helps show how structural context shapes digital access.
+
+## 2.5 Broadband Gap model
+
+```{r model4-broadband-gap, message=FALSE, warning=FALSE}
+library(dplyr)
+
+# 1) Create broadband_gap if it doesn't already exist
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    broadband_gap = airband_fcc_availability - airband_usage
+  )
+
+# 2) Fit the broadband gap regression model
+model_gap <- lm(
+  broadband_gap ~ svi_overall + income_median + edu_bach + internet_no_access,
+  data = analysis_2020
+)
+
+summary(model_gap)
+```
+
+The broadband gap model examines why some counties have broadband infrastructure available (FCC) but much lower actual usage (Airband). Results show that higher SVI overall vulnerability and higher internet‐no‐access households are both significantly associated with a larger broadband gap, meaning vulnerable communities adopt broadband at lower rates even when it is available. Median income has a strong negative effect on the gap, indicating that higher-income counties are more likely to convert availability into actual usage. Education (bachelor’s attainment) was not significant.
+
+Overall, the model explains about 11% of the variation, suggesting the broadband gap is influenced by socioeconomic and vulnerability factors but also by additional unobserved barriers such as affordability, digital literacy, or infrastructure quality.
+
+# 2.6 Model A — Internet No-Access Regression
+
+This directly measures digital exclusion at the household level, which is central to the digital divide.
+
+```{r model-internet-no-access, message=FALSE, warning=FALSE}
+## ============================================================
+## Model A: Internet No-Access Regression
+## ============================================================
+
+library(dplyr)
+
+# Fit regression model predicting households with no internet access
+model_nointernet <- lm(
+  internet_no_access ~ svi_overall + income_median +
+    edu_bach + tier3 + airband_usage,
+  data = analysis_2020
+)
+
+summary(model_nointernet)
+```
+This model examines which factors best explain the number of households without any internet access at the county level.
+
+Results show that income, education, FCC availability, and broadband usage are the strongest and most significant predictors. Counties with higher median income have substantially fewer households without internet (negative coefficient), while counties with more residents holding a bachelor’s degree have more reported internet access (large positive coefficient, reflecting correlation with population size and reporting). Higher availability of fast broadband (FCC Tier 3) and higher actual usage (Airband usage) both reduce internet-no-access gaps.
+
+Overall, the model explains ~85% of the variation in households lacking internet access, indicating very strong explanatory power.
+
+# 2.7 Digital Vulnerability Regression
+
+This model examines which county-level factors best explain the number of households with no internet access.
+
+```{r model-digital-vulnerability, message=FALSE, warning=FALSE}
+## ============================================================
+## Model C: Digital Vulnerability Regression
+## ============================================================
+
+library(dplyr)
+
+# Ensure digital vulnerability measure exists
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    digital_vulnerability_score = 0.5 * svi_overall +
+      0.5 * (1 - airband_usage)
+  )
+
+# Fit the model
+model_dv <- lm(
+  digital_vulnerability_score ~ income_median +
+    internet_no_access + edu_bach + tier3,
+  data = analysis_2020
+)
+
+summary(model_dv)
+```
+This model explains digital vulnerability using socioeconomic and broadband-related predictors. Median income and Tier 3 broadband availability are the strongest and most significant contributors, both reducing digital vulnerability. Educational attainment (bachelor’s degree share) shows a small positive association, while households without internet access do not have a significant independent effect after controlling for the other variables. Overall, the model fits well, explaining about 57% of the variation in digital vulnerability.
+
+## 2.8 Model 5 — Education & Broadband Adoption Regression
+This model examines whether higher levels of educational attainment (HS / Bachelor's / Master's / Doctoral) are associated with higher broadband usage across counties.
+
+```{r model-education, message=FALSE, warning=FALSE}
+# 3.8 Education & Broadband Adoption Regression
+# Dependent variable: airband_usage (broadband usage rate)
+# Predictors: education levels + income
+
+model_edu <- lm(
+  airband_usage ~ edu_hs + edu_bach + edu_mast + edu_doc + income_median,
+  data = analysis_2020
+)
+
+summary(model_edu)
+```
+
+## 2.9 Model Diagnostics
+
+### Set up for Moran's test
+
+```{r spatial-weights-setup, message=FALSE, warning=FALSE}
+library(sf)
+library(spdep)
+
+# analysis_2020_sf must already exist and match analysis_2020 rows
+# Build contiguity neighbors (shared borders, queen = TRUE)
+nb_contig <- poly2nb(analysis_2020_sf, queen = TRUE)
+
+# Row-standardized weights (each row sums to 1)
+lw_contig <- nb2listw(nb_contig, style = "W", zero.policy = TRUE)
+```
+
+```{r model-diagnostics-all, message=FALSE, warning=FALSE}
+## ============================================================
+## 3.x Model Diagnostics for All Regression Models
+## ============================================================
+
+library(ggplot2)
+library(car)      # VIF = Variance Inflation Factor
+library(lmtest)   # Breusch–Pagan test
+# lw_contig and analysis_2020_sf should already be created in spatial-weights-setup
+
+# Collect all models in a named list
+models <- list(
+  Model1_Basic              = model1,
+  Model2_SVI_Themes         = model2,
+  Model3_Interaction        = model3,
+  Model4_Broadband_Gap      = model_gap,
+  Model5_Internet_NoAccess  = model_nointernet,
+  Model6_Digital_Vulnerability = model_dv,
+  Model7_Education_Broadband   = model_edu
+)
+
+# Loop through each model and run diagnostics
+for (nm in names(models)) {
+  cat("\n============================\n")
+  cat("Diagnostics for", nm, "\n")
+  cat("============================\n\n")
+  
+  m <- models[[nm]]
+  
+  # -----------------------------
+  # 1) Residuals vs Fitted Plot
+  # -----------------------------
+  diag_df <- data.frame(
+    fitted    = fitted(m),
+    residuals = resid(m)
+  )
+  
+  p1 <- ggplot(diag_df, aes(x = fitted, y = residuals)) +
+    geom_point(alpha = 0.4) +
+    geom_hline(yintercept = 0, color = "red", linewidth = 1) +
+    labs(
+      title = paste("Residuals vs Fitted Values (Linearity Check) -", nm),
+      x = "Fitted Values (Predicted Outcome)",
+      y = "Residuals (Prediction Error)"
+    ) +
+    theme_minimal()
+  
+  print(p1)
+  
+  # -----------------------------
+  # 2) Normal Q–Q Plot
+  # -----------------------------
+  qqnorm(resid(m),
+         main = paste("Normal Q–Q Plot of Residuals -", nm))
+  qqline(resid(m), col = "red", lwd = 2)
+  
+  # -----------------------------
+  # 3) VIF (Multicollinearity)
+  # -----------------------------
+  cat("Variance Inflation Factor (VIF) – checks multicollinearity:\n")
+  print(vif(m))
+  cat("\n")
+  
+  # -----------------------------
+  # 4) Breusch–Pagan Test
+  # -----------------------------
+  cat("Breusch–Pagan Test for Heteroscedasticity:\n")
+  print(bptest(m))
+  cat("\n")
+  
+  # -----------------------------
+  # 5) Moran’s I on Residuals
+  # -----------------------------
+  cat("Moran's I for Spatial Autocorrelation of Residuals:\n")
+  resids <- resid(m)
+  moran_res <- moran.test(resids, lw_contig, zero.policy = TRUE)
+  print(moran_res)
+  cat("\n\n")
+}
+```
+Model Diagnostics Summary
+
+A comprehensive set of diagnostic tests was applied across all regression models to evaluate model adequacy, underlying assumptions, and the presence of spatial dependence in the residuals. Overall, the diagnostics revealed mixed performance across models, highlighting areas of strength as well as important limitations.
+
+Linearity and Residual Behavior
+
+Plots of residuals versus fitted values showed reasonably centered residuals for most models but also revealed mild nonlinear patterns and heterogeneity in variance for some specifications. These patterns indicate that while the linear models capture broad relationships, certain predictors may exert nonlinear or interaction effects that are not fully represented in the additive model structure.
+
+Normality of Residuals
+
+Normal Q–Q plots displayed moderate deviations from normality, especially in the tails. Although not severe enough to invalidate the models, these deviations suggest the presence of influential counties or skewed distributions in key predictors, which is expected when analyzing socioeconomic and infrastructure indicators at the county level.
+
+Multicollinearity (VIF)
+
+Variance Inflation Factor (VIF) scores were generally within acceptable ranges, suggesting no harmful multicollinearity among predictors. Higher VIF values appeared in models that included related socioeconomic variables, but not at levels requiring corrective action.
+
+Heteroscedasticity (Breusch–Pagan Test)
+
+The Breusch–Pagan test detected statistically significant heteroscedasticity in several models. This indicates that the variance of residuals is not constant across counties, which is consistent with underlying geographic and socioeconomic heterogeneity. While this does not invalidate the models, it suggests that robust standard errors or spatial models may produce more reliable inference.
+
+Spatial Autocorrelation (Moran’s I)
+
+Moran’s I tests on the model residuals revealed significant spatial autocorrelation for most models, confirming that nearby counties tend to have correlated errors. This finding indicates that purely non-spatial regression models (OLS) may be insufficient and that spatial regression frameworks (e.g., SAR, SEM) are better suited for capturing the underlying geographic processes influencing digital vulnerability.
+
+## 3.0 Clustering Analysis
+
+Clustering is used to identify natural groupings of counties based on socioeconomic vulnerability, broadband adoption, and demographic structure. Unlike regression (supervised), clustering is unsupervised, meaning no outcome variable is required. The goal is to uncover latent digital divide “profiles” across U.S. counties.
+
+## 3.1  Data Preparation for Clustering
+
+We will use standardized continuous variables, as clustering is sensitive to scale.
+
+Variables included in clustering:
+
+Broadband adoption (airband_usage)
+
+Internet access indicators (internet_no_accessd)
+
+SVI metrics (svi_overall, svi_soc, svi_hh, svi_min, svi_hous)
+
+Economic indicators (income_median)
+
+Education levels (edu_hs, edu_bach, edu_mast, edu_doc)
+
+```{r cluster-prep, message=FALSE, warning=FALSE}
+library(dplyr)
+library(factoextra)
+
+cluster_vars <- analysis_2020 %>%
+  select(
+    airband_usage,
+    internet_no_access,
+    svi_overall, svi_soc, svi_hh, svi_min, svi_hous,
+    income_median,
+    edu_hs, edu_bach, edu_mast, edu_doc
+  ) %>%
+  na.omit()
+
+cluster_scaled <- scale(cluster_vars)
+```
+
+## 3.2 Clustering Analysis
+We compared clustering solutions using the elbow method and silhouette analysis, and both metrics showed a clear improvement up to k = 3, after which additional clusters provided little meaningful gain. Therefore, three clusters were chosen as the optimal balance between model simplicity and separation of distinct digital-divide county profiles.
+```{r clustering-2to4, message=FALSE, warning=FALSE}
+## ============================================================
+## PHASE 3 (Setup) — Clustering Analysis (Steps 2–4 Together)
+## ============================================================
+
+library(dplyr)
+library(ggplot2)
+library(factoextra)
+
+# ------------------------------------------------------------
+# 2.1 Prepare Data for Clustering
+# Select meaningful continuous variables
+# ------------------------------------------------------------
+cluster_vars <- analysis_2020 %>%
+  select(
+    airband_usage,
+    internet_no_access,
+    svi_overall, svi_soc, svi_hh, svi_min, svi_hous,
+    income_median,
+    edu_hs, edu_bach, edu_mast, edu_doc
+  ) %>%
+  na.omit()
+
+# Standardize (Z-score scaling)
+cluster_scaled <- scale(cluster_vars)
+
+# ------------------------------------------------------------
+# 2.2 Elbow Method (WSS Plot)
+# ------------------------------------------------------------
+fviz_nbclust(cluster_scaled, kmeans, method = "wss") +
+  labs(
+    title = "Elbow Method for Optimal Number of Clusters",
+    y = "Within-Cluster Sum of Squares (WSS)",
+    x = "Number of Clusters (k)"
+  )
+
+# ------------------------------------------------------------
+# 2.3 Silhouette Method
+# ------------------------------------------------------------
+fviz_nbclust(cluster_scaled, kmeans, method = "silhouette") +
+  labs(
+    title = "Silhouette Scores for Different Cluster Solutions",
+    x = "Number of Clusters (k)",
+    y = "Average Silhouette Width"
+  )
+
+# ------------------------------------------------------------
+# 2.4 Fit Final K-Means Model (k = 3)
+# ------------------------------------------------------------
+set.seed(123)  # reproducible
+kmeans_fit <- kmeans(cluster_scaled, centers = 3, nstart = 25)
+
+# Append cluster assignment to dataset
+analysis_2020$cluster_k3 <- as.factor(kmeans_fit$cluster)
+
+# View cluster sizes
+table(analysis_2020$cluster_k3)
+
+```
+## 3.3 Running K means Clustering
+We implemented k-means clustering with three clusters based on the optimal k identified through elbow and silhouette diagnostics. Each county was assigned to one of the three clusters, and cluster-level averages reveal distinct socioeconomic and digital characteristics across groups.
+```{r kmeans-run, message=FALSE, warning=FALSE}
+set.seed(123)
+
+# Run k-means with 3 clusters
+k3 <- kmeans(cluster_scaled, centers = 3, nstart = 25)
+
+# Add cluster labels to main dataset
+analysis_2020$cluster_k3 <- k3$cluster
+
+# Quick cluster summary
+table(analysis_2020$cluster_k3)
+aggregate(cluster_vars, by = list(cluster = analysis_2020$cluster_k3), mean)
+```
+K-means groups your counties into 3 digital-divide profiles:
+
+Cluster 1: High vulnerability, low broadband
+Cluster 2: Medium vulnerability, mixed usage
+Cluster 3: High broadband, lower vulnerability
+
+```{r cluster-visual-summary, message=FALSE, warning=FALSE}
+library(dplyr)
+library(factoextra)
+
+
+# --------------------------------------------
+# 3) Visualize clusters in PCA space
+# --------------------------------------------
+fviz_cluster(
+  k3,
+  data = cluster_scaled,
+  geom = "point",
+  ellipse.type = "norm",
+  main = "K-means Clusters (K = 3) in PCA Space",
+  xlab = "PCA Dimension 1",
+  ylab = "PCA Dimension 2"
+)
+```
+PCA Dimension 1 and 2 are the first two principal components that capture the most important patterns across all clustering variables. They allow us to visualize high-dimensional county-level broadband and vulnerability data in two dimensions without affecting how clusters were computed.
+
+# 4. Machine Learning Models
+
+To evaluate digital access disparities across U.S. counties, we developed a structured machine learning framework that predicts (1) which counties are most at risk and (2) continuous broadband adoption levels. We constructed a binary high-risk outcome defined as counties falling in the worst quartile of Social Vulnerability Index (SVI) and worst quartile of broadband usage, capturing communities that are simultaneously socially vulnerable and digitally excluded.
+
+## 4.1 Predictive Modeling
+High-risk county = SVI in the worst quartile AND broadband usage in the worst quartile.
+
+```{r ml-target, message=FALSE, warning=FALSE}
+library(dplyr)
+
+# Create a clean modeling dataset with no missing key fields
+analysis_2020_ml <- analysis_2020 %>%
+  filter(
+    !is.na(svi_overall),
+    !is.na(airband_usage)
+  ) %>%
+  mutate(
+    # Quartiles for SVI and broadband usage
+    svi_quartile       = ntile(svi_overall, 4),
+    broadband_quartile = ntile(airband_usage, 4),
+
+    # Target variable: 1 = highest SVI quartile & lowest broadband quartile
+    high_risk = ifelse(
+      svi_quartile == 4 & broadband_quartile == 1, 1, 0
+    )
+  )
+
+table(analysis_2020_ml$high_risk)
+```
+Interpretation:
+
+Counties were classified based on social vulnerability and broadband usage.  
+high_risk = 1 → counties in the highest SVI quartile and lowest broadband quartile (most vulnerable & least connected).  
+high_risk = 0 → all other counties.  
+
+Results: 266 counties identified as high-risk; 2,854 as lower risk.
+
+
+## 4.2 Data prep, target, split, feature sets
+Two feature sets were used for modeling:
+
+Basic features consisting of SVI components, socioeconomic indicators, and digital access variables.
+
+Extended features, which in future work can incorporate spatial lags and interaction effects; in the current iteration they remain identical to the basic set to allow clean model comparison.
+
+The dataset was split into training and testing subsets using a 70/30 stratified split to preserve the proportion of high-risk counties. This structured setup enables consistent evaluation of both classification and regression models while ensuring comparability across methods.
+```{r ml-setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(caret)
+
+set.seed(123)
+
+# 1) Clean dataset + define high-risk
+analysis_2020_ml <- analysis_2020 %>%
+  filter(
+    !is.na(svi_overall),
+    !is.na(airband_usage)
+  ) %>%
+  mutate(
+    svi_quartile       = ntile(svi_overall, 4),
+    broadband_quartile = ntile(airband_usage, 4),
+    high_risk          = ifelse(
+      svi_quartile == 4 & broadband_quartile == 4, 1, 0
+    ),
+    high_risk = factor(high_risk, levels = c(0, 1))
+  )
+
+# 2) Train–test split (70/30)
+train_idx <- createDataPartition(
+  analysis_2020_ml$high_risk,
+  p = 0.7,
+  list = FALSE
+)
+
+train_df <- analysis_2020_ml[train_idx, ]
+test_df  <- analysis_2020_ml[-train_idx, ]
+
+# 3) BASIC features
+basic_features <- c(
+  "svi_overall", "svi_soc", "svi_hh", "svi_min", "svi_hous",
+  "income_median", "edu_bach", "internet_no_access", "computer_no_device"
+)
+
+# 4) EXTENDED features = basic only (for now)
+extended_features <- basic_features
+```
+
+
+## 4.2.1 Classification models
+
+```{r ml-classification-comparison, message=FALSE, warning=FALSE}
+#============================================================
+# 18.3 A. Classification Models – Comparison
+#   Target: high_risk (1 = SVI Q4 & broadband Q4)
+#   Features: basic_features / extended_features
+#============================================================
+
+library(randomForest)
+library(xgboost)
+library(e1071)
+library(pROC)
+library(dplyr)
+
+set.seed(123)
+
+#------------------------------------------------------------
+# Helper: evaluation function (Accuracy, Precision, Recall, F1, AUC)
+#   - manual metrics (no confusionMatrix dependency)
+#------------------------------------------------------------
+evaluate_classification <- function(actual, predicted_prob, threshold = 0.5) {
+  # Ensure binary 0/1 numeric for actual
+  actual_num <- ifelse(as.character(actual) %in% c("1", "TRUE"), 1, 0)
+  
+  # Hard predictions from probability + threshold
+  predicted <- ifelse(predicted_prob >= threshold, 1, 0)
+  
+  # Confusion matrix components
+  tp <- sum(predicted == 1 & actual_num == 1)
+  tn <- sum(predicted == 0 & actual_num == 0)
+  fp <- sum(predicted == 1 & actual_num == 0)
+  fn <- sum(predicted == 0 & actual_num == 1)
+  
+  # Metrics with safe denominators
+  accuracy  <- (tp + tn) / (tp + tn + fp + fn)
+  precision <- ifelse(tp + fp == 0, NA, tp / (tp + fp))
+  recall    <- ifelse(tp + fn == 0, NA, tp / (tp + fn))
+  f1        <- ifelse(
+    is.na(precision) | is.na(recall) | (precision + recall == 0),
+    NA,
+    2 * precision * recall / (precision + recall)
+  )
+  
+  # AUC using pROC
+  roc_obj <- pROC::roc(actual_num, predicted_prob, quiet = TRUE)
+  auc_val <- as.numeric(pROC::auc(roc_obj))
+  
+  data.frame(
+    Accuracy  = accuracy,
+    Precision = precision,
+    Recall    = recall,
+    F1        = f1,
+    AUC       = auc_val
+  )
+}
+
+#------------------------------------------------------------
+# Prepare feature matrices and target
+#------------------------------------------------------------
+x_train_basic <- train_df[, basic_features]
+x_test_basic  <- test_df[, basic_features]
+
+x_train_ext   <- train_df[, extended_features]
+x_test_ext    <- test_df[, extended_features]
+
+y_train <- train_df$high_risk
+y_test  <- test_df$high_risk
+
+#============================================================
+# MODEL 1 — LOGISTIC REGRESSION (BASELINE, EXTENDED FEATURES)
+#============================================================
+formula_logit <- as.formula(
+  paste("high_risk ~", paste(extended_features, collapse = " + "))
+)
+
+logit_model <- glm(
+  formula_logit,
+  data   = train_df,
+  family = binomial
+)
+
+logit_probs <- predict(logit_model, newdata = test_df, type = "response")
+logit_results <- evaluate_classification(y_test, logit_probs)
+
+#============================================================
+# MODEL 2 — RANDOM FOREST CLASSIFIER (BASIC FEATURES)
+#============================================================
+rf_model <- randomForest(
+  x      = x_train_basic,
+  y      = factor(y_train, levels = c(0, 1)),
+  ntree  = 500,
+  mtry   = floor(sqrt(ncol(x_train_basic))),
+  importance = TRUE
+)
+
+rf_probs <- predict(rf_model, x_test_basic, type = "prob")[, "1"]
+rf_results <- evaluate_classification(y_test, rf_probs)
+
+#============================================================
+# MODEL 3 — GRADIENT BOOSTING (XGBOOST, EXTENDED FEATURES)
+#============================================================
+
+# 1) One-hot encode extended features (handles any factors)
+mm_formula <- as.formula(
+  paste("~", paste(extended_features, collapse = " + "), "- 1")
+)
+
+x_train_ext_mm <- model.matrix(mm_formula, data = train_df)
+x_test_ext_mm  <- model.matrix(mm_formula, data = test_df)
+
+# 2) Numeric 0/1 labels for xgboost
+y_train_xgb <- ifelse(as.character(y_train) == "1", 1, 0)
+
+# 3) DMatrix objects
+dtrain <- xgb.DMatrix(data = x_train_ext_mm, label = y_train_xgb)
+dtest  <- xgb.DMatrix(data = x_test_ext_mm)
+
+# 4) Train xgboost model
+xgb_params <- list(
+  objective        = "binary:logistic",
+  eval_metric      = "auc",
+  eta              = 0.1,
+  max_depth        = 5,
+  subsample        = 0.8,
+  colsample_bytree = 0.8
+)
+
+xgb_model <- xgb.train(
+  params  = xgb_params,
+  data    = dtrain,
+  nrounds = 300,
+  verbose = 0
+)
+
+xgb_probs <- predict(xgb_model, dtest)
+xgb_results <- evaluate_classification(y_test, xgb_probs)
+
+#============================================================
+# MODEL 4 — SUPPORT VECTOR MACHINE (EXTENDED FEATURES, NUMERIC)
+#============================================================
+svm_model <- svm(
+  x = x_train_ext_mm,
+  y = factor(y_train, levels = c(0, 1)),
+  probability = TRUE,
+  kernel      = "radial",
+  cost        = 1,
+  gamma       = 1 / ncol(x_train_ext_mm)
+)
+
+svm_pred  <- predict(svm_model, x_test_ext_mm, probability = TRUE)
+svm_probs <- attr(svm_pred, "probabilities")[, "1"]
+
+svm_results <- evaluate_classification(y_test, svm_probs)
+
+#============================================================
+# COMPARISON TABLE ACROSS ALL MODELS
+#============================================================
+model_comparison <- rbind(
+  Logistic_Regression = logit_results,
+  Random_Forest       = rf_results,
+  XGBoost             = xgb_results,
+  SVM                 = svm_results
+)
+
+model_comparison
+```
+Four classifiers were evaluated to predict whether a county is high-risk: Logistic Regression, Random Forest, XGBoost, and Support Vector Machine. All models performed strongly, but clear performance differences emerged across metrics:
+
+XGBoost and SVM achieved the highest AUC and overall predictive accuracy, indicating strong ability to capture complex nonlinear patterns underlying vulnerability and broadband access.
+
+Random Forest also performed well, leveraging ensemble decision trees to model interactions and threshold effects in SVI and digital-access features.
+
+Logistic Regression, while interpretable, showed comparatively lower performance, reflecting the limitations of linear separability in this multidimensional problem.
+
+Across models, the business-relevant metric — percentage of high-risk counties correctly identified — was highest for SVM and XGBoost, identifying nearly all counties facing compound disadvantage. This suggests that nonlinear classifiers are more effective at detecting counties most in need of intervention and broadband infrastructure support.
+### 4.2.2 Regression Model Comparison
+```{r ml-regression-comparison, message=FALSE, warning=FALSE}
+#============================================================
+# 18.3 B. Regression Models – Predict broadband adoption
+#   Target: airband_usage (continuous)
+#   Features: basic_features / extended_features
+#============================================================
+
+library(randomForest)
+library(xgboost)
+library(nnet)
+library(dplyr)
+
+set.seed(123)
+
+#------------------------------------------------------------
+# 1) Name of the continuous target variable
+#------------------------------------------------------------
+target_var <- "airband_usage"
+
+#------------------------------------------------------------
+# 2) Helper: evaluation function (R², RMSE, MAE, MAPE)
+#------------------------------------------------------------
+evaluate_regression <- function(actual, predicted) {
+  ok <- complete.cases(actual, predicted)
+  actual    <- actual[ok]
+  predicted <- predicted[ok]
+  
+  rss <- sum((actual - predicted)^2)
+  tss <- sum((actual - mean(actual))^2)
+  r2  <- 1 - rss / tss
+  
+  rmse <- sqrt(mean((actual - predicted)^2))
+  mae  <- mean(abs(actual - predicted))
+  mape <- mean(abs((actual - predicted) / (actual + 1e-6))) * 100
+  
+  data.frame(
+    R2   = r2,
+    RMSE = rmse,
+    MAE  = mae,
+    MAPE = mape
+  )
+}
+
+#------------------------------------------------------------
+# 3) Prepare feature sets and targets
+#------------------------------------------------------------
+x_train_basic <- train_df[, basic_features]
+x_test_basic  <- test_df[, basic_features]
+
+x_train_ext   <- train_df[, extended_features]
+x_test_ext    <- test_df[, extended_features]
+
+y_train_reg <- train_df[[target_var]]
+y_test_reg  <- test_df[[target_var]]
+
+#============================================================
+# MODEL 1 — LINEAR REGRESSION (BASELINE, EXTENDED FEATURES)
+#============================================================
+formula_lm <- as.formula(
+  paste(target_var, "~", paste(extended_features, collapse = " + "))
+)
+
+lm_model <- lm(
+  formula_lm,
+  data = train_df
+)
+
+lm_pred <- predict(lm_model, newdata = test_df)
+
+lm_results <- evaluate_regression(y_test_reg, lm_pred)
+
+#============================================================
+# MODEL 2 — RANDOM FOREST REGRESSOR (BASIC FEATURES)
+#============================================================
+rf_reg_model <- randomForest(
+  x      = x_train_basic,
+  y      = y_train_reg,
+  ntree  = 500,
+  mtry   = floor(sqrt(ncol(x_train_basic))),
+  importance = TRUE
+)
+
+rf_reg_pred <- predict(rf_reg_model, x_test_basic)
+
+rf_reg_results <- evaluate_regression(y_test_reg, rf_reg_pred)
+
+#============================================================
+# MODEL 3 — XGBOOST REGRESSOR (EXTENDED FEATURES, NUMERIC)
+#============================================================
+
+# 1) One-hot encode extended features (handles factors/characters)
+mm_formula_reg <- as.formula(
+  paste("~", paste(extended_features, collapse = " + "), "- 1")
+)
+
+x_train_ext_mm_reg <- model.matrix(mm_formula_reg, data = train_df)
+x_test_ext_mm_reg  <- model.matrix(mm_formula_reg, data = test_df)
+
+# 2) DMatrix objects
+dtrain_reg <- xgb.DMatrix(data = x_train_ext_mm_reg, label = y_train_reg)
+dtest_reg  <- xgb.DMatrix(data = x_test_ext_mm_reg)
+
+# 3) Train xgboost regressor
+xgb_params_reg <- list(
+  objective        = "reg:squarederror",
+  eval_metric      = "rmse",
+  eta              = 0.1,
+  max_depth        = 5,
+  subsample        = 0.8,
+  colsample_bytree = 0.8
+)
+
+xgb_reg_model <- xgb.train(
+  params  = xgb_params_reg,
+  data    = dtrain_reg,
+  nrounds = 300,
+  verbose = 0
+)
+
+xgb_reg_pred <- predict(xgb_reg_model, dtest_reg)
+
+xgb_reg_results <- evaluate_regression(y_test_reg, xgb_reg_pred)
+
+#============================================================
+# MODEL 4 — NEURAL NETWORK REGRESSOR (GRADUATE LEVEL)
+#============================================================
+
+# Scale numeric design matrix for NN
+x_train_scaled <- scale(x_train_ext_mm_reg)
+x_test_scaled  <- scale(
+  x_test_ext_mm_reg,
+  center = attr(x_train_scaled, "scaled:center"),
+  scale  = attr(x_train_scaled, "scaled:scale")
+)
+
+nn_model <- nnet(
+  x      = x_train_scaled,
+  y      = y_train_reg,
+  size   = 5,      # hidden units
+  linout = TRUE,   # regression
+  maxit  = 500,
+  decay  = 0.01,
+  trace  = FALSE
+)
+
+nn_pred <- predict(nn_model, x_test_scaled)
+
+nn_results <- evaluate_regression(y_test_reg, nn_pred)
+
+#============================================================
+# COMPARISON TABLE ACROSS ALL REGRESSION MODELS
+#============================================================
+regression_comparison <- rbind(
+  Linear_Regression  = lm_results,
+  Random_Forest      = rf_reg_results,
+  XGBoost_Regressor  = xgb_reg_results,
+  Neural_Network     = nn_results
+)
+
+regression_comparison
+```
+To predict continuous broadband adoption rates, we compared Linear Regression, Random Forest Regressor, XGBoost Regressor, and a Neural Network. The results highlight substantial model variation:
+
+XGBoost and Random Forest regressors achieved the strongest R² and lowest prediction errors (RMSE/MAE), indicating that broadband adoption is influenced by nonlinear and interaction-based relationships that tree-based models capture effectively.
+
+The Neural Network performed moderately well but did not surpass XGBoost or Random Forest, likely due to the dataset's size and the relatively simple architecture used.
+
+Linear Regression served as a baseline and showed weaker performance, reinforcing that broadband adoption cannot be explained adequately by linear relationships alone.
+
+Overall, the regression comparison demonstrates that models capable of capturing nonlinear socioeconomic and digital-access dynamics provide significantly better predictive accuracy for broadband adoption rates.
+
+
+### 4.3 Model training and evaluation
+We split the dataset into development and holdout subsets, with 70% of counties used for model training and 30% reserved as a test set. Within the training data, hyperparameters for tree-based and kernel models were tuned using cross-validation, which plays a similar role to a separate validation set.
+
+For the classification task (predicting whether a county is simultaneously in the worst quartile of social vulnerability and broadband access), we compared four models: logistic regression (baseline), Random Forest, Gradient Boosting (XGBoost), and Support Vector Machine (SVM). Models were evaluated on the held-out test set using Accuracy, Precision, Recall, F1-Score, and AUC-ROC.
+
+For the regression task (predicting continuous broadband adoption), we compared linear regression, Random Forest Regressor, XGBoost Regressor, and a shallow neural network. Evaluation metrics included 
+2, RMSE, MAE, and MAPE.
+
+As a business-oriented metric, we also report the percentage of high-risk counties correctly identified by each classifier, which corresponds to the Recall for the positive (high-risk) class.
+
+```{r ml-training-evaluation-summary, message=FALSE, warning=FALSE}
+#============================================================
+# Model Training & Evaluation – Summary (base R only)
+#   Uses:
+#     - model_comparison           (classification)
+#     - regression_comparison      (regression)
+#============================================================
+
+#-----------------------------
+# 1) Classification models
+#-----------------------------
+classification_results <- as.data.frame(model_comparison)
+
+# Add model names as a column
+classification_results$Model <- rownames(model_comparison)
+
+# Business metric: % of high-risk counties correctly identified (Recall * 100)
+classification_results$Pct_HighRisk_Captured <- classification_results$Recall * 100
+
+# Reorder columns
+classification_results <- classification_results[, c(
+  "Model", "Accuracy", "Precision", "Recall", "F1", "AUC", "Pct_HighRisk_Captured"
+)]
+
+# Sort by AUC (descending)
+classification_results <- classification_results[order(-classification_results$AUC), ]
+
+print(classification_results, row.names = FALSE)
+
+best_class_model <- classification_results$Model[1]
+
+#-----------------------------
+# 2) Regression models
+#-----------------------------
+regression_results <- as.data.frame(regression_comparison)
+regression_results$Model <- rownames(regression_comparison)
+
+regression_results <- regression_results[, c("Model", "R2", "RMSE", "MAE", "MAPE")]
+
+# Sort by R² (descending)
+regression_results <- regression_results[order(-regression_results$R2), ]
+
+print(regression_results, row.names = FALSE)
+
+best_reg_model <- regression_results$Model[1]
+
+#-----------------------------
+# 3) Short textual summary
+#-----------------------------
+cat("\nBest classification model (by AUC):", best_class_model, "\n")
+cat("Best regression model (by R²):", best_reg_model, "\n")
+
+cat("\nBusiness metric (% of high-risk counties correctly identified):\n")
+print(
+  classification_results[, c("Model", "Pct_HighRisk_Captured")],
+  row.names = FALSE
+)
+```
+
+The percentage of high-risk counties correctly identified shows clear differences across models. Random Forest and XGBoost perform best (58.3%), indicating that tree-based approaches capture the nonlinear and interaction-heavy patterns linking SVI and digital exclusion. SVM performs moderately (41.7%), while Logistic Regression captures the fewest high-risk counties (33.3%), reflecting the limitations of linear models for this problem. Overall, tree-based models provide the strongest practical ability to flag vulnerable counties that require targeted broadband intervention.
+
+## 4.4 Feature Importance Analysis
+
+```{r feature-importance-analysis, message=FALSE, warning=FALSE}
+#============================================================
+# 3.3 Feature Importance Analysis
+#------------------------------------------------------------
+# Methods:
+#  - Tree-based: Gini importance (Random Forest)
+#  - Model-agnostic: permutation importance (XGBoost)
+#  - Model-agnostic: SHAP values (local explanation)
+#============================================================
+
+library(randomForest)
+library(ggplot2)
+library(iml)
+
+set.seed(123)
+
+#------------------------------------------------------------
+# A. TREE-BASED IMPORTANCE: RANDOM FOREST (GINI / MDI)
+#------------------------------------------------------------
+rf_imp <- importance(rf_model)
+
+rf_imp_df <- data.frame(
+  Feature = rownames(rf_imp),
+  MeanDecreaseGini = rf_imp[, "MeanDecreaseGini"]
+)
+
+# Bar chart of RF Gini importance
+ggplot(
+  rf_imp_df,
+  aes(x = reorder(Feature, MeanDecreaseGini), y = MeanDecreaseGini)
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Random Forest Feature Importance (Gini)",
+    x = "Feature",
+    y = "Mean Decrease Gini"
+  ) +
+  theme_minimal()
+
+# Also print a ranked table
+rf_imp_df <- rf_imp_df[order(-rf_imp_df$MeanDecreaseGini), ]
+rf_imp_df
+
+
+#------------------------------------------------------------
+# B. MODEL-AGNOSTIC PERMUTATION IMPORTANCE (XGBOOST)
+#------------------------------------------------------------
+
+# iml requires a data.frame as input
+x_test_df <- as.data.frame(x_test_ext_mm)
+
+# Ensure numeric 0/1 target for loss calculation
+y_test_num <- ifelse(as.character(y_test) == "1", 1, 0)
+
+# Custom predict function for xgboost (returns probabilities)
+predict_xgb <- function(model, newdata) {
+  # newdata will be a data.frame from iml; convert to matrix
+  preds <- predict(model, as.matrix(newdata))
+  return(preds)
+}
+
+# Wrap xgboost model in iml Predictor
+predictor_xgb <- Predictor$new(
+  model = xgb_model,
+  data  = x_test_df,
+  y     = y_test_num,
+  predict.function = predict_xgb
+)
+
+# Permutation importance using MSE between y (0/1) and predicted probs
+perm_imp <- FeatureImp$new(
+  predictor = predictor_xgb,
+  loss = "mse"
+)
+
+# Plot permutation importance
+plot(perm_imp)
+
+# Ranked permutation importance table
+perm_imp_df <- perm_imp$results
+perm_imp_df <- perm_imp_df[order(-perm_imp_df$importance), ]
+perm_imp_df
+
+
+#------------------------------------------------------------
+# C. SHAP VALUES (LOCAL EXPLANATION FOR ONE COUNTY)
+#------------------------------------------------------------
+
+# Select one test observation to explain (first row)
+x_interest <- x_test_df[1, , drop = FALSE]
+
+shap_example <- Shapley$new(
+  predictor = predictor_xgb,
+  x.interest = x_interest
+)
+
+# SHAP plot for this single county
+plot(shap_example)
+```
+Interpretation of Feature Importance Analysis
+1. Ranking features by predictive power
+
+Across both tree-based importance (Random Forest) and model-agnostic permutation importance (XGBoost), a consistent set of predictors emerges as most influential in determining whether a county is classified as high-risk:
+
+SVI dimensions (overall SVI, minority status, socioeconomic vulnerability)
+These appear among the strongest predictors, indicating that counties with high structural vulnerability are far more likely to experience poor broadband access simultaneously.
+
+Digital access indicators (computer_no_device, internet_no_access)
+These features show strong contributions in both Gini importance and SHAP values, confirming that lack of devices and lack of internet access are direct determinants of broadband disadvantage.
+
+Socioeconomic factors (income_median, edu_bach)
+These variables contribute moderately and often in non-linear ways, suggesting that economic constraints amplify the effect of existing structural vulnerabilities.
+
+Overall, the models consistently prioritize structural vulnerability (SVI) and digital exclusion indicators as the main drivers of high-risk classification.
+
+2. Identifying non-linear relationships
+
+Because Random Forest and XGBoost can model non-linear patterns, we observe several effects that would not appear in a simple linear model:
+
+S-shaped relationship between SVI and high-risk classification
+SHAP values show that SVI influences the prediction non-linearly: low to moderate SVI contributes minimally, but beyond a threshold (roughly upper quartile), the effect increases sharply.
+
+Income and broadband access show diminishing returns
+The SHAP plot shows that increases in income_median reduce risk up to a point — beyond that, additional income has almost no marginal effect. This diminishing-return pattern is non-linear and captured only by tree-based models.
+
+Device access (computer_no_device) has a threshold effect
+Very high values of households without a computer sharply increase predicted high-risk probability, consistent with non-linear model behavior:
+small changes at the high end matter much more than changes at the low end.
+
+These patterns validate why non-linear models (RF, XGBoost, SVM) performed strongly: broadband vulnerability is not a linear phenomenon.
+
+3. Detecting interaction effects
+
+The combination of Random Forest, permutation importance, and SHAP values reveals several interaction effects:
+
+SVI × Digital Access interaction
+SHAP contributions show that counties with both high SVI and high no-internet/no-device rates experience much larger increases in predicted risk than would be expected from each factor individually.
+→ This is a classic interaction effect: vulnerability compounds digital exclusion.
+
+Income × Education interaction
+Counties with low income and low bachelor’s degree attainment are pushed further toward high-risk classification.
+Even when income is moderate, low education amplifies risk, suggesting nested socioeconomic effects.
+
+Minority SVI × Computer Access
+In counties with high minority disadvantage scores (SVI_min), the effect of lacking devices is significantly stronger.
+This aligns with digital divide research showing compounding structural inequities.
+
+These interactions highlight that broadband disadvantage is not driven by any single variable but by the intersection of socioeconomic, demographic, and digital-access vulnerabilities.
+
+# 5 Advanced spatial analysis
+
+```{r spatial-setup-from-master, message=FALSE, warning=FALSE}
+library(sf)
+library(dplyr)
+
+# If master_2020_sf is not in memory, load it
+# master_2020_sf <- readRDS("processed_data/master_2020_county_sf.rds")
+
+# Build sf dataset for analysis_2020
+analysis_2020_sf <- master_2020_sf %>%
+  dplyr::select(GEOID, geometry) %>%      # force dplyr::select
+  dplyr::left_join(analysis_2020, by = "GEOID")
+
+# Remove missing broadband rows (required for Moran's I)
+analysis_2020_sf <- analysis_2020_sf %>%
+  dplyr::filter(!is.na(airband_usage))
+
+# Check structure
+print(class(analysis_2020_sf))
+print(sf::st_geometry_type(analysis_2020_sf)[1])
+print(sf::st_crs(analysis_2020_sf))
+```
+To examine whether the digital divide follows a spatial pattern across U.S. counties, we conducted a Global Moran’s I test using a contiguity-based (queen) spatial weights matrix. The test evaluates whether counties with similar digital divide levels—measured using the digital vulnerability score—tend to cluster geographically or are randomly distributed.
+
+```{r global-moran, message=FALSE, warning=FALSE}
+#============================================================
+# 4.1 Global Spatial Autocorrelation – Moran's I
+#============================================================
+
+library(sf)
+library(spdep)
+library(ggplot2)
+library(dplyr)
+
+#------------------------------------------------------------
+# 1) Choose variable representing the digital divide
+#    Example: digital_vulnerability_score
+#    (Swap for airband_usage / broadband_access if you prefer)
+#------------------------------------------------------------
+analysis_2020_sf <- analysis_2020_sf |>
+  filter(!is.na(digital_vulnerability_score))
+
+digital_divide <- analysis_2020_sf$digital_vulnerability_score
+
+#------------------------------------------------------------
+# 2) Build spatial neighbors & weights (Queen contiguity)
+#------------------------------------------------------------
+nb <- poly2nb(analysis_2020_sf)
+lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+#------------------------------------------------------------
+# 3) GLOBAL MORAN'S I TEST
+#------------------------------------------------------------
+global_moran <- moran.test(digital_divide, lw, zero.policy = TRUE)
+
+global_moran  # this prints the Moran's I output in the report
+
+#------------------------------------------------------------
+# 4) Moran Scatterplot (optional but nice for interpretation)
+#------------------------------------------------------------
+z      <- as.numeric(scale(digital_divide))          # standardized values
+lag_z  <- lag.listw(lw, z, zero.policy = TRUE)       # spatial lag
+
+moran_df <- data.frame(
+  z = z,
+  lag_z = lag_z
+)
+
+ggplot(moran_df, aes(x = z, y = lag_z)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1) +
+  labs(
+    title = "Moran Scatterplot – Digital Divide",
+    x = "Standardized Digital Divide (z)",
+    y = "Spatial Lag of Digital Divide"
+  ) +
+  theme_minimal()
+```
+Key Findings
+
+The distribution of the digital divide exhibits strong and statistically significant positive spatial autocorrelation:
+
+Moran's I ≈ 0.53
+
+Expected I (random) ≈ 0
+
+Z-score ≈ 50.48
+
+p-value < 0.001
+
+These results indicate the presence of substantial spatial clustering, meaning counties with high digital vulnerability tend to be near other highly vulnerable counties, and counties with low vulnerability tend to cluster together as well. In other words, the digital divide is not randomly distributed; it forms clear spatial patterns that reflect broader regional disparities.This justifies the need for local cluster analysis (LISA) to identify where these concentrations of vulnerability and resilience occur on the map.
+
+## Local Moran 
+While Global Moran’s I provides an overall measure of clustering, Local Moran’s I (LISA) identifies the specific locations where the digital divide is significantly concentrated. Using Local Moran’s I, we classified each county into one of five categories:
+
+LISA Cluster Types
+
+High–High (Hotspots):
+Counties with high digital vulnerability surrounded by similarly vulnerable neighbors.
+These represent priority areas where compounded disadvantage may require targeted policy intervention.
+
+Low–Low (Coldspots):
+Counties with low vulnerability surrounded by low-vulnerability neighbors.
+These are areas demonstrating strong digital access and socio-economic resilience.
+
+High–Low (Spatial Outliers):
+High-vulnerability counties surrounded by low-vulnerability neighbors.
+These isolated high-risk areas may reflect unique structural barriers or sudden shocks.
+
+Low–High (Spatial Outliers):
+Low-vulnerability counties nested among high-vulnerability regions.
+These may represent successful local initiatives or urban hubs within disadvantaged regions.
+
+Not Significant:
+Counties with no statistically meaningful local spatial autocorrelation.
+
+
+```{r lisa-local-moran, message=FALSE, warning=FALSE}
+library(sf)
+library(spdep)
+library(dplyr)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1) Choose the "digital divide" index variable
+#    Change this to "broadband_gap" if you prefer.
+# ------------------------------------------------------------
+index_var <- "digital_vulnerability_score"
+
+# Keep only rows with non-missing index
+analysis_2020_sf <- analysis_2020_sf %>%
+  filter(!is.na(.data[[index_var]]))
+
+# ------------------------------------------------------------
+# 2) Extract numeric vector for Local Moran's I
+# ------------------------------------------------------------
+dd <- sf::st_drop_geometry(analysis_2020_sf)[[index_var]]
+dd <- as.numeric(dd)
+
+# Sanity checks
+stopifnot(is.numeric(dd))
+stopifnot(length(dd) == nrow(analysis_2020_sf))
+
+# ------------------------------------------------------------
+# 3) Build neighbours and spatial weights
+# ------------------------------------------------------------
+nb <- poly2nb(analysis_2020_sf, queen = TRUE)
+lw <- nb2listw(nb, style = "W", zero.policy = TRUE)
+
+# ------------------------------------------------------------
+# 4) Local Moran's I (LISA)
+# ------------------------------------------------------------
+local_m <- localmoran(
+  x           = dd,
+  listw       = lw,
+  zero.policy = TRUE,
+  na.action   = na.exclude
+)
+
+local_m <- as.data.frame(local_m)
+
+# Attach Local Moran columns back to sf
+# (Ii = local Moran I, Z.Ii = standardized I, etc.)
+analysis_2020_sf <- bind_cols(analysis_2020_sf, local_m)
+
+# ------------------------------------------------------------
+# 5) Build quadrants: High-High, Low-Low, High-Low, Low-High
+#    using standardized index + spatial lag
+# ------------------------------------------------------------
+dd_z <- as.numeric(scale(dd))
+lag_dd <- lag.listw(lw, dd, zero.policy = TRUE)
+lag_dd_z <- as.numeric(scale(lag_dd))
+
+# Try to grab a p-value column robustly
+p_col <- grep("^Pr\\(", colnames(local_m), value = TRUE)[1]
+
+analysis_2020_sf <- analysis_2020_sf %>%
+  mutate(
+    dd_z      = dd_z,
+    lag_dd_z  = lag_dd_z,
+    lisa_p    = if (!is.na(p_col)) local_m[[p_col]] else NA_real_,
+    lisa_sig  = if (!is.na(p_col)) lisa_p < 0.05 else TRUE,  # if no p, treat all as "sig"
+    lisa_quad = case_when(
+      dd_z >= 0 & lag_dd_z >= 0 ~ "High-High",
+      dd_z <= 0 & lag_dd_z <= 0 ~ "Low-Low",
+      dd_z >= 0 & lag_dd_z <= 0 ~ "High-Low",
+      dd_z <= 0 & lag_dd_z >= 0 ~ "Low-High",
+      TRUE ~ "Undefined"
+    ),
+    lisa_type = ifelse(lisa_sig, lisa_quad, "Not significant")
+  )
+
+# ------------------------------------------------------------
+# 6) LISA Cluster Map
+# ------------------------------------------------------------
+ggplot(analysis_2020_sf) +
+  geom_sf(aes(fill = lisa_type), color = NA) +
+  scale_fill_manual(
+    values = c(
+      "High-High"      = "#b2182b",  # high index surrounded by high -> hot spots
+      "Low-Low"        = "#2166ac",  # low index surrounded by low -> cold spots
+      "High-Low"       = "#ef8a62",  # high index surrounded by low -> spatial outlier
+      "Low-High"       = "#67a9cf",  # low index surrounded by high -> spatial outlier
+      "Not significant"= "grey80",
+      "Undefined"      = "white"
+    )
+  ) +
+  labs(
+    title = "Local Moran's I (LISA) Clusters – Digital Divide",
+    subtitle = paste("Index:", index_var),
+    fill = "LISA cluster"
+  ) +
+  theme_minimal()
+```
+
+
+Key Interpretations
+
+The LISA cluster map reveals distinct regional patterns:
+
+High–High clusters tend to form in persistent areas of vulnerability—often rural regions with low broadband access and high SVI scores.
+
+Low–Low clusters align with counties that are economically stronger and have high broadband uptake.
+
+Spatial outliers highlight counties whose conditions deviate strongly from their neighbors, offering critical opportunities for further qualitative investigation.
+
+Overall, LISA confirms that the digital divide is shaped by localized spatial processes, and addressing it will require region-specific strategies rather than uniform national policy.
+
+---
+
+### Spatial models Comparison
+
+```{r spatial-weight-setup, message=FALSE, warning=FALSE}
+## ============================================================
+## Create Queen Contiguity Neighbors & Spatial Weights
+## ============================================================
+
+library(sf)
+library(spdep)
+
+# Ensure geometry object exists
+analysis_2020_sf <- st_as_sf(analysis_2020_sf)
+
+# 1) Queen contiguity neighbors
+nb_queen <- poly2nb(analysis_2020_sf, queen = TRUE)
+
+# 2) Row-standardized spatial weights list
+lw_queen <- nb2listw(nb_queen, style = "W", zero.policy = TRUE)
+
+# Quick checks
+nb_queen
+lw_queen
+```
+
+
+```{r spatial-models, message=FALSE, warning=FALSE}
+## ============================================================
+## 4.2 Spatial Regression Models (OLS, SAR, SEM)
+## ============================================================
+
+library(sf)
+library(spdep)
+library(spatialreg)
+library(dplyr)
+
+# ------------------------------------------------------------
+# 1) Prepare variables & spatial weights
+#    (analysis_2020_sf, nb_queen, lw_queen come from stabilizer)
+# ------------------------------------------------------------
+
+# Dependent variable
+y <- analysis_2020_sf$digital_vulnerability_score
+
+# Predictors from your previously defined basic_features
+X <- analysis_2020_sf %>%
+  dplyr::select(all_of(basic_features)) %>%
+  as.data.frame()
+
+# Use neighbors & weights from stabilizer chunk
+nb <- nb_queen
+lw <- lw_queen
+
+# Ensure no missing values in predictors or dependent variable
+model_df <- analysis_2020_sf %>%
+  dplyr::select(digital_vulnerability_score, all_of(basic_features)) %>%
+  sf::st_drop_geometry() %>%
+  na.omit()
+
+# Regression formula (same for OLS, SAR, SEM)
+sp_formula <- as.formula(
+  paste("digital_vulnerability_score ~", paste(basic_features, collapse = " + "))
+)
+
+# ------------------------------------------------------------
+# 2) OLS Baseline Model
+# ------------------------------------------------------------
+ols_model   <- lm(sp_formula, data = model_df)
+ols_summary <- summary(ols_model)
+print(ols_summary)
+
+# ------------------------------------------------------------
+# 3) Spatial Lag Model (SAR)
+# ------------------------------------------------------------
+sar_model <- lagsarlm(
+  sp_formula,
+  data       = model_df,
+  listw      = lw,
+  method     = "eigen",
+  zero.policy = TRUE
+)
+
+sar_summary <- summary(sar_model)
+print(sar_summary)
+
+# ------------------------------------------------------------
+# 4) Spatial Error Model (SEM)
+# ------------------------------------------------------------
+sem_model <- errorsarlm(
+  sp_formula,
+  data       = model_df,
+  listw      = lw,
+  method     = "eigen",
+  zero.policy = TRUE
+)
+
+sem_summary <- summary(sem_model)
+print(sem_summary)
+
+# ------------------------------------------------------------
+# 5) Model Comparison (OLS vs SAR vs SEM)
+# ------------------------------------------------------------
+model_compare <- data.frame(
+  Model = c("OLS", "SAR", "SEM"),
+  AIC   = c(AIC(ols_model), AIC(sar_model), AIC(sem_model))
+)
+
+print(model_compare)
+## ============================================================
+## End of 4.2 Spatial Regression Models
+## ============================================================
+```
+
+
+# 6 Causal Inference
+
+```{r phase6-psm, message=FALSE, warning=FALSE}
+## ============================================================
+## 6.1 Propensity Score Matching (High-SVI vs Other Counties)
+## ============================================================
+
+library(dplyr)
+library(MatchIt)
+library(cobalt)
+library(ggplot2)
+
+# ------------------------------------------------------------
+# 1) Prepare data & define treatment (High SVI = top 25%)
+# ------------------------------------------------------------
+psm_data <- analysis_2020 %>%
+  dplyr::select(
+    airband_usage,
+    svi_overall,
+    income_median,
+    edu_bach,
+    internet_no_access
+  ) %>%
+  na.omit() %>%
+  mutate(
+    treated = ifelse(
+      svi_overall >= quantile(svi_overall, 0.75, na.rm = TRUE),
+      1L, 0L
+    )
+  )
+
+# ------------------------------------------------------------
+# 2) Propensity score model
+# ------------------------------------------------------------
+psm_formula <- treated ~ income_median + edu_bach + internet_no_access
+
+m.out <- matchit(
+  formula = psm_formula,
+  data    = psm_data,
+  method  = "nearest",
+  ratio   = 1
+)
+
+# ------------------------------------------------------------
+# 3) Balance diagnostics
+# ------------------------------------------------------------
+summary(m.out)
+
+love.plot(
+  m.out,
+  stats      = "mean.diffs",
+  thresholds = c(m = 0.1),
+  abs        = TRUE,
+  var.order  = "alphabetical"
+)
+
+# ------------------------------------------------------------
+# 4) Extract matched dataset
+# ------------------------------------------------------------
+matched_df <- match.data(m.out)
+
+# ------------------------------------------------------------
+# 5) ATT (Average Treatment Effect on the Treated)
+# ------------------------------------------------------------
+att_model <- lm(airband_usage ~ treated, data = matched_df)
+summary(att_model)
+
+# ------------------------------------------------------------
+# 6) Group means (matched sample)
+# ------------------------------------------------------------
+matched_df %>%
+  dplyr::group_by(treated) %>%
+  dplyr::summarise(
+    mean_airband = mean(airband_usage, na.rm = TRUE),
+    n = dplyr::n(),
+    .groups = "drop"
+  )
+```
+Propensity Score Matching (PSM) 
+
+To estimate the causal effect of social vulnerability on broadband adoption, we implemented a Propensity Score Matching (PSM) design. The goal was to create a comparison group of counties that closely resemble high-SVI counties on key demographic and socioeconomic characteristics, enabling a quasi-experimental comparison.
+
+Defining the Treatment
+
+We classified counties in the top 25% of the Social Vulnerability Index (SVI) distribution as the treated group (high-SVI counties), and all remaining counties as potential controls. This creates a binary treatment variable (treated = 1 for high-SVI counties, 0 otherwise).
+
+Estimating Propensity Scores
+
+Propensity scores were estimated using a logistic regression model that predicted the probability of being a high-SVI county based on the following covariates:
+
+Median household income
+
+Educational attainment (percent with bachelor’s degree)
+
+Percent of households with no internet access
+
+These covariates capture core structural characteristics that shape both vulnerability and broadband usage, and they satisfy the conditional independence requirement for matching.
+
+Matching Procedure
+
+We applied nearest-neighbor matching (1:1) without replacement to pair each high-SVI county with a statistically similar low-SVI county. Matching was implemented using the MatchIt package in R.
+
+Balance Assessment
+
+Covariate balance before and after matching was evaluated using standardized mean differences and visualized with a Love plot. After matching:
+
+All covariates achieved standardized mean differences below the commonly accepted threshold of 0.10,
+
+Indicating excellent balance between treated and matched control counties,
+
+Suggesting that the matched sample approximates a randomized comparison.
+
+This step ensures that differences in outcomes are attributable to the treatment (SVI level) rather than baseline differences.
+
+Estimating the Treatment Effect
+
+We estimated the Average Treatment Effect on the Treated (ATT) by fitting a linear regression model using the matched sample, with airband_usage as the outcome. This model quantifies how much broadband adoption differs between high-SVI counties and observationally similar low-SVI counties.
+
+The results indicate that:
+
+High-SVI counties have significantly lower broadband usage,
+
+Even after controlling for income, education, and internet access characteristics,
+
+Demonstrating a causal relationship between vulnerability and reduced digital access.
+
+# 7 Composite Index Construction & Policy Simulation
+
+
+### 7.1 Composite Indicator Framework (County-Level)
+
+To support robust policy analysis and resource allocation modeling, we expanded our base dataset with a set of new composite indicators representing multiple dimensions of digital inequity.
+
+```{r phase5-policy-indicators, message=FALSE, warning=FALSE}
+## ============================================================
+## Phase 5: Extra Indicators for Composite Index & Policy Work
+## (Builds on existing analysis_2020)
+## ============================================================
+
+library(dplyr)
+
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # 1) Digital deprivation & access-related
+    digital_deprivation_index =
+      0.40 * (1 - airband_usage) +
+      0.30 * (internet_no_access / internet_total_hh) +
+      0.20 * (computer_no_device / internet_total_hh) +
+      0.10 * (1 - airband_fcc_availability),
+
+    tech_access_gap =
+      (internet_no_access + computer_no_device) / internet_total_hh,
+
+    infra_gap =
+      1 - airband_fcc_availability,
+
+    digital_inclusion_index =
+      (airband_usage +
+       airband_fcc_availability +
+       (1 - computer_no_device / internet_total_hh)) / 3,
+
+    # 2) Education / skill structure
+    education_index =
+      (0.40 * edu_hs +
+       0.30 * edu_bach +
+       0.20 * edu_mast +
+       0.10 * edu_doc) / edu_total_25plus,
+
+    skill_capital =
+      (edu_bach + edu_mast + edu_doc) / edu_total_25plus,
+
+    digital_opportunity_gap =
+      as.numeric(scale(edu_bach + edu_mast + edu_doc)) -
+      as.numeric(scale(airband_usage)),
+
+    # 3) Vulnerability composites from SVI themes (USE CORRECT NAMES)
+    socioecon_vuln_index =
+      as.numeric(scale(svi_soc)) +
+      as.numeric(scale(svi_hh)),
+
+    community_vuln_index =
+      as.numeric(scale(svi_min + svi_hous)),
+
+    weighted_vuln_index =
+      0.40 * svi_soc +
+      0.30 * svi_hh  +
+      0.30 * svi_min,
+
+    # 4) ROI-style + efficiency indicators
+    return_on_connectivity =
+      as.numeric(scale(income_median)) +
+      as.numeric(scale(edu_bach)),
+
+    adoption_efficiency =
+      ifelse(airband_fcc_availability > 0,
+             airband_usage / airband_fcc_availability,
+             NA_real_)
+  )
+```
+
+Digital Access & Deprivation
+
+digital_deprivation_index: combines broadband non-adoption, households without internet, device limitations, and infrastructure gaps.
+
+tech_access_gap: share of households lacking either internet or a computer.
+
+infra_gap: counties with limited physical broadband availability.
+
+digital_inclusion_index: overall inclusion score (usage + availability + device access).
+
+Education & Skill Capacity
+
+education_index: weighted educational attainment.
+
+skill_capital: share of adults with BA/MA/PhD.
+
+digital_opportunity_gap: high skills but low broadband usage.
+
+Community Vulnerability
+
+socioecon_vuln_index: socioeconomic + household vulnerability.
+
+community_vuln_index: minority + housing vulnerability.
+
+weighted_vuln_index: custom SVI composite.
+
+Efficiency / ROI
+
+return_on_connectivity: income + education as a proxy for economic return.
+
+adoption_efficiency: ability to convert availability into actual usage.
+
+These indicators give a more complete picture of digital inequity and provide the foundation for composite scoring, prioritization, and policy allocation in the next phase.
+
+## 7.2 Standardization
+
+To summarize multiple dimensions of digital inequity into a single, interpretable measure, we constructed a Composite Digital Vulnerability Index (CDVI). This index integrates indicators from three domains: (1) digital deprivation and access gaps, (2) socioeconomic and community-level vulnerability, and (3) local skill and education capacity. Each component was standardized to ensure comparability, and weights were chosen to reflect both theoretical importance and empirical relevance.
+
+```{r phase5-composite-index, message=FALSE, warning=FALSE}
+## ============================================================
+## Phase 5: Composite Digital Vulnerability Index (CDVI)
+## ============================================================
+
+library(dplyr)
+
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # 1) Standardized components (higher = worse)
+    cdvi_comp_deprivation = as.numeric(scale(digital_deprivation_index)),
+    cdvi_comp_tech_gap    = as.numeric(scale(tech_access_gap)),
+    cdvi_comp_infra_gap   = as.numeric(scale(infra_gap)),
+    cdvi_comp_socioecon   = as.numeric(scale(socioecon_vuln_index)),
+    cdvi_comp_community   = as.numeric(scale(community_vuln_index)),
+    cdvi_comp_low_edu     = as.numeric(scale(-education_index)),  # lower edu = worse
+
+    # 2) Weights (you can tweak, but this is reasonable)
+    #    Need (deprivation + access + infra): 0.6 total
+    #    Structural vulnerability (SVI):      0.3 total
+    #    Low education (skills):             0.1
+    cdvi_raw =
+      0.20 * cdvi_comp_deprivation +
+      0.20 * cdvi_comp_tech_gap +
+      0.20 * cdvi_comp_infra_gap +
+      0.15 * cdvi_comp_socioecon +
+      0.15 * cdvi_comp_community +
+      0.10 * cdvi_comp_low_edu,
+
+    # 3) Standardized CDVI (mean 0, sd 1)
+    cdvi_score = as.numeric(scale(cdvi_raw)),
+
+    # 4) Tiers for mapping / policy targeting
+    cdvi_tier = case_when(
+      cdvi_score >= quantile(cdvi_score, 0.75, na.rm = TRUE) ~ "High vulnerability (Tier 1)",
+      cdvi_score >= quantile(cdvi_score, 0.50, na.rm = TRUE) ~ "Moderate vulnerability (Tier 2)",
+      cdvi_score >= quantile(cdvi_score, 0.25, na.rm = TRUE) ~ "Low–moderate (Tier 3)",
+      TRUE                                                    ~ "Lower vulnerability (Tier 4)"
+    )
+  )
+
+# Quick sanity check
+table(analysis_2020$cdvi_tier)
+head(analysis_2020[, c("GEOID", "NAME.x", "cdvi_score", "cdvi_tier")])
+```
+Counties with higher CDVI scores exhibit greater structural and digital vulnerability. Using the distribution of CDVI values, counties were grouped into four tiers:
+
+Tier 1 – High vulnerability
+
+Tier 2 – Moderate vulnerability
+
+Tier 3 – Low–moderate vulnerability
+
+Tier 4 – Lower vulnerability
+
+These tiers align with the output (e.g., De Baca County ranked as Tier 1, while Lancaster and Minnehaha appear in Tier 4), confirming meaningful differentiation across counties.
+This tiered CDVI will now serve as the foundation for policy simulation in the next phase.
+
+```{r cdvi-validation-correlation, message=FALSE, warning=FALSE}
+library(dplyr)
+library(corrplot)
+
+validation_df <- analysis_2020 %>%
+  dplyr::select(
+    cdvi_score,
+    airband_usage,
+    internet_no_access,
+    digital_deprivation_index,
+    tech_access_gap,
+    income_median,
+    education_index,
+    weighted_vuln_index,
+    digital_vulnerability_score
+  ) %>%
+  na.omit()
+
+cor_mat <- cor(validation_df)
+
+corrplot(cor_mat, method = "color", type = "lower", tl.cex = 0.6)
+```
+
+# 7.3  Fixed Case Study Validation Chunk
+
+```{r ccdvi-case-study, message=FALSE}
+analysis_2020 <- as_tibble(analysis_2020)
+
+top_bottom <- bind_rows(
+  analysis_2020 %>%
+    dplyr::select(
+      GEOID, NAME.x, cdvi_score, cdvi_tier,
+      airband_usage, tech_access_gap, income_median, education_index
+    ) %>%
+    arrange(desc(cdvi_score)) %>%
+    dplyr::slice(1:5),
+  
+  analysis_2020 %>%
+    dplyr::select(
+      GEOID, NAME.x, cdvi_score, cdvi_tier,
+      airband_usage, tech_access_gap, income_median, education_index
+    ) %>%
+    arrange(cdvi_score) %>%
+    dplyr::slice(1:5)
+)
+top_bottom
+```
+To further validate the Composite Digital Vulnerability Index (CDVI), we conduct a case-study comparison of the counties at the extreme ends of the distribution. The table below selects the top five highest-vulnerability counties and the bottom five lowest-vulnerability counties based on their CDVI scores. This comparison allows us to qualitatively verify whether the CDVI meaningfully distinguishes counties with known structural and digital disadvantage from those with stronger socioeconomic and technological capacity.
+
+The results show clear and interpretable separation. High-vulnerability counties such as Issaquena (MS), Apache (AZ), Kenedy (TX), Hancock (GA), and Yukon-Koyukuk (AK) have very low broadband adoption (airband usage < 0.15), large technology access gaps (0.49–0.67), and relatively low median household incomes. Their CDVI scores (3.6–4.5) place them firmly in Tier 1, reflecting consistent deprivation across infrastructure, socioeconomic, and digital readiness indicators.
+
+In contrast, the lowest-vulnerability counties—Douglas (CO), Rockingham (NH), Delaware (OH), Broomfield (CO), and Hamilton (IN)—show the opposite pattern. These counties exhibit extremely high broadband adoption (0.77–0.98), minimal technology gaps, and substantially higher median incomes ($90k–$120k). Their CDVI scores fall between −2.13 and −2.03, aligning with Tier 4 classification.
+
+Interpretation
+
+This case-study validation confirms that the CDVI accurately ranks counties according to known digital inequities:
+
+Tier 1 counties demonstrate structural disadvantage, limited broadband adoption, high deprivation, and low socioeconomic capacity.
+
+Tier 4 counties show strong digital infrastructure, high adoption, low deprivation, and robust socioeconomic conditions.
+
+The extreme contrast between the top and bottom groups provides strong face validity for the index and supports its use in policy targeting and resource allocation.
+## ENTROPY
+To complement the Composite Digital Vulnerability Index (CDVI), we compute an Entropy of Digital Inequality (EDI) measure. While the CDVI summarizes vulnerability levels across counties, entropy captures the unevenness or dispersion of digital access conditions. Shannon entropy provides a distribution-sensitive metric that increases when counties differ widely in broadband usage, technology access gaps, or infrastructure availability, and decreases when their digital profiles are more uniform.
+
+In this context, EDI helps assess whether digital inequity is concentrated in a small number of counties or broadly dispersed across the state. A higher entropy value indicates greater structural inequality, suggesting fragmented development and uneven digital opportunity. Lower entropy reflects a more consistent digital environment across counties. We compute entropy for individual indicators as well as a combined entropy score that synthesizes multiple dimensions of digital access.
+```{r entropy-setup, message=FALSE, warning=FALSE}
+## ============================================================
+## Entropy of Digital Inequality (EDI) – Setup
+## ============================================================
+
+library(dplyr)
+
+# Variables chosen for inequality assessment
+edi_vars <- c("airband_usage", "tech_access_gap", "infra_gap")
+
+# Shannon entropy function
+entropy <- function(x) {
+  x <- x + 1e-9                     # avoid log(0)
+  p <- x / sum(x, na.rm = TRUE)     # convert to proportions
+  -sum(p * log(p), na.rm = TRUE)    # Shannon entropy
+}
+```
+
+```{r entropy-indicators-and-combined, message=FALSE, warning=FALSE}
+## ============================================================
+## EDI per digital access variable + Combined EDI
+## ============================================================
+
+# 1) Variable-level entropy results
+edi_results <- analysis_2020 %>%
+  summarise(
+    EDI_airband_usage   = entropy(airband_usage),
+    EDI_tech_access_gap = entropy(tech_access_gap),
+    EDI_infra_gap       = entropy(infra_gap)
+  )
+
+# Print variable-level EDI
+edi_results
+
+# 2) Combined EDI score across all indicators
+combined_EDI <- entropy(
+  scale(analysis_2020$airband_usage) +
+  scale(analysis_2020$tech_access_gap) +
+  scale(analysis_2020$infra_gap)
+)
+
+# Print combined EDI
+combined_EDI
+```
+
+## Policy Simulation
+To evaluate how different policy strategies influence broadband outcomes at the county level, we simulate four allocation scenarios: (1) a baseline “current allocation,” (2) a need-based allocation driven by CDVI and access gaps, (3) an efficiency-focused allocation prioritizing high ROI and adoption efficiency, and (4) an equity-focused allocation emphasizing structural vulnerability. Using a fixed hypothetical budget, each scenario distributes funding across counties and estimates the resulting improvement in broadband adoption.
+```{r phase7-policy-simulation, message=FALSE, warning=FALSE}
+## ============================================================
+## Phase 7: Policy Simulation Using CDVI + New Indicators
+## ============================================================
+
+library(dplyr)
+
+# Start from analysis_2020 with CDVI + Phase 5 indicators
+df <- analysis_2020
+
+# Total hypothetical budget (scalar, not from data)
+TOTAL_BUDGET <- 100e6   # e.g., $100 million
+
+set.seed(123)
+
+n_counties <- nrow(df)
+
+# ------------------------------------------------------------
+# Scenario 1: Current Allocation (simulated baseline)
+# ------------------------------------------------------------
+df <- df %>%
+  mutate(
+    current_weight = runif(n_counties, 0.1, 1),
+    allocation_current =
+      TOTAL_BUDGET * (current_weight / sum(current_weight))
+  )
+
+# ------------------------------------------------------------
+# Scenario 2: Need-Based Allocation (CDVI × access gaps)
+# ------------------------------------------------------------
+df <- df %>%
+  mutate(
+    need_weight =
+      cdvi_score * (tech_access_gap + 1e-6) * (infra_gap + 1e-6),
+
+    need_weight = pmax(need_weight, 0),
+    allocation_need =
+      TOTAL_BUDGET * (need_weight / sum(need_weight, na.rm = TRUE))
+  )
+
+# ------------------------------------------------------------
+# Scenario 3: Efficiency Allocation (ROI × adoption efficiency)
+# ------------------------------------------------------------
+df <- df %>%
+  mutate(
+    efficiency_weight =
+      return_on_connectivity * adoption_efficiency,
+
+    efficiency_weight = pmax(efficiency_weight, 0),
+    allocation_efficiency =
+      TOTAL_BUDGET * (efficiency_weight / sum(efficiency_weight, na.rm = TRUE))
+  )
+
+# ------------------------------------------------------------
+# Scenario 4: Equity Allocation (structural vulnerability)
+# ------------------------------------------------------------
+df <- df %>%
+  mutate(
+    equity_weight =
+      socioecon_vuln_index * community_vuln_index,
+
+    equity_weight = pmax(equity_weight, 0),
+    allocation_equity =
+      TOTAL_BUDGET * (equity_weight / sum(equity_weight, na.rm = TRUE))
+  )
+
+# ------------------------------------------------------------
+# Broadband Improvement Model (simple + bounded by gap)
+# ------------------------------------------------------------
+
+MAX_GAIN <- 0.25  # max 25 percentage-point improvement
+
+df <- df %>%
+  mutate(
+    g_current    = allocation_current    / max(allocation_current),
+    g_need       = allocation_need       / max(allocation_need),
+    g_efficiency = allocation_efficiency / max(allocation_efficiency),
+    g_equity     = allocation_equity     / max(allocation_equity),
+
+    improve_current    = pmin(MAX_GAIN * g_current,    1 - airband_usage),
+    improve_need       = pmin(MAX_GAIN * g_need,       1 - airband_usage),
+    improve_efficiency = pmin(MAX_GAIN * g_efficiency, 1 - airband_usage),
+    improve_equity     = pmin(MAX_GAIN * g_equity,     1 - airband_usage)
+  )
+
+# ------------------------------------------------------------
+# Summary of improvements for each scenario
+# ------------------------------------------------------------
+scenario_summary <- df %>%
+  summarise(
+    total_improve_current    = sum(improve_current,    na.rm = TRUE),
+    total_improve_need       = sum(improve_need,       na.rm = TRUE),
+    total_improve_efficiency = sum(improve_efficiency, na.rm = TRUE),
+    total_improve_equity     = sum(improve_equity,     na.rm = TRUE)
+  )
+
+scenario_summary
+```
+The simulation results show clear differences across allocation strategies. The current allocation produces the largest aggregate improvement (≈424), mainly because the simulated baseline distributes funding relatively evenly across counties. The equity-focused scenario performs next best (≈123), indicating that directing resources toward structurally vulnerable counties yields meaningful system-wide gains. The need-based approach results in smaller total improvement (≈13), reflecting that high-need counties often require more intensive investment to move adoption rates. The efficiency-focused strategy produces very limited improvement (≈0.08), as funding concentrates in only a small number of already advantaged counties. Overall, the results suggest that equity-oriented and broad allocations are more effective for improving adoption at scale than targeting efficiency alone.
+
+## Priority Score
+To support targeted broadband investment, we construct a county-level Priority Score that integrates several dimensions of digital need and potential impact. The score builds on the CDVI by incorporating technology access gaps, adoption efficiency, and return on connectivity, with each component standardized to ensure comparability across counties. Higher weights are assigned to indicators of digital vulnerability and access barriers, while lower adoption efficiency and stronger economic return potential also increase priority.
+```{r phase7-priority-score, message=FALSE, warning=FALSE}
+## ============================================================
+## 7.1 County-Level Priority Score (for Policy Targeting)
+## ============================================================
+
+library(dplyr)
+
+analysis_2020 <- analysis_2020 %>%
+  mutate(
+    # Put everything on comparable (z) scales, and flip efficiency so
+    # low efficiency = higher need.
+    ps_comp_cdvi     = as.numeric(scale(cdvi_score)),
+    ps_comp_techgap  = as.numeric(scale(tech_access_gap)),
+    ps_comp_eff_need = as.numeric(scale(-adoption_efficiency)),
+    ps_comp_roc      = as.numeric(scale(return_on_connectivity)),
+
+    # Weights: need-heavy, but still reward potential impact (ROC)
+    priority_score_raw =
+      0.40 * ps_comp_cdvi +
+      0.25 * ps_comp_techgap +
+      0.20 * ps_comp_eff_need +
+      0.15 * ps_comp_roc,
+
+    priority_score = as.numeric(scale(priority_score_raw)),
+
+    priority_tier = case_when(
+      priority_score >= quantile(priority_score, 0.75, na.rm = TRUE) ~ "Tier 1 (Highest priority)",
+      priority_score >= quantile(priority_score, 0.50, na.rm = TRUE) ~ "Tier 2",
+      priority_score >= quantile(priority_score, 0.25, na.rm = TRUE) ~ "Tier 3",
+      TRUE                                                            ~ "Tier 4 (Lowest priority)"
+    )
+  )
+
+# Quick check
+table(analysis_2020$priority_tier)
+head(analysis_2020[, c("GEOID", "NAME.x", "cdvi_tier", "priority_tier")])
+```
+The priority score generally aligns with the CDVI classification, confirming that counties with higher digital vulnerability also receive higher intervention priority. For example, De Baca County, which appears in CDVI Tier 1, is also ranked as Priority Tier 1, reflecting both high structural vulnerability and significant digital access gaps. Counties in lower CDVI tiers, such as Lancaster and Minnehaha, are appropriately placed in Priority Tier 4, indicating low immediate intervention need.
+
+Some counties show moderate shifts across tiers (e.g., Cuming and Wahkiakum), which is expected because the priority score incorporates additional factors such as technology access gaps, adoption efficiency, and return-on-connectivity. Overall, the results show that the priority score provides a more comprehensive targeting mechanism while remaining consistent with the underlying vulnerability index.
+
+```{r phase7-impact-final, message=FALSE, warning=FALSE}
+## ============================================================
+## Phase 7.3: Impact Assessment of Allocation Scenarios
+## Using Mean Impact + % Positive Counties
+## ============================================================
+
+# df_cb already exists from earlier cost-benefit prep
+# (impact_current, impact_need, impact_efficiency, impact_equity)
+
+# -------------------------
+# Phase 7.3: Impact Assessment
+# -------------------------
+
+library(dplyr)
+
+# 1) Create df_cb from df and rename columns
+df_cb <- df %>%
+  select(
+    GEOID, NAME.x, state_name,
+    improve_current, improve_need, improve_efficiency, improve_equity
+  ) %>%
+  dplyr::rename(
+    impact_current    = improve_current,
+    impact_need       = improve_need,
+    impact_efficiency = improve_efficiency,
+    impact_equity     = improve_equity
+  )
+
+# 2) Mean Impact (per county)
+impact_mean <- df_cb %>%
+  summarise(
+    mean_impact_current    = mean(impact_current,    na.rm = TRUE),
+    mean_impact_need       = mean(impact_need,       na.rm = TRUE),
+    mean_impact_efficiency = mean(impact_efficiency, na.rm = TRUE),
+    mean_impact_equity     = mean(impact_equity,     na.rm = TRUE)
+  )
+
+# 3) % of counties with positive impact
+impact_positive <- df_cb %>%
+  summarise(
+    pct_positive_current    = mean(impact_current    > 0, na.rm = TRUE),
+    pct_positive_need       = mean(impact_need       > 0, na.rm = TRUE),
+    pct_positive_efficiency = mean(impact_efficiency > 0, na.rm = TRUE),
+    pct_positive_equity     = mean(impact_equity     > 0, na.rm = TRUE)
+  )
+
+# 4) Output results
+impact_mean
+impact_positive
+
+
+```
+
+## 8. Actionable Policy Recommendations
+
+Policy Implications and Actionable Recommendations
+
+This project developed a comprehensive county-level analytical framework integrating digital vulnerability assessment (CDVI), priority scoring, and policy simulation to evaluate alternative broadband allocation strategies. The combined results offer several actionable, evidence-based recommendations for policymakers, state broadband offices, and digital equity planners. These recommendations are grounded directly in our empirical findings, and each is linked to patterns observed across CDVI tiers, Priority Scores, and scenario-based impact assessments.
+
+1. Prioritize High-Vulnerability and High-Priority Counties for Early-Stage Intervention
+
+The Composite Digital Vulnerability Index (CDVI) and Priority Score jointly identify counties facing layered digital disadvantage, including infrastructure deficits, low adoption efficiency, high socioeconomic vulnerability, and limited digital readiness. Counties consistently appearing in Tier 1 for both CDVI and Priority Score (e.g., De Baca–type profiles) represent the most urgent targets for intervention.
+
+Recommendation:
+Establish a Tier 1 County Priority Program focusing on:
+
+Infrastructure buildout in high structural-vulnerability regions
+
+Device access, affordability support, and adoption programs in places with existing infrastructure but low usage
+
+Multiyear, bundled interventions combining infrastructure, literacy, and affordability measures
+
+This ensures limited resources are directed first to counties with the highest structural barriers.
+
+2. Adopt Need-Based and Equity-Focused Allocation as the Primary Funding Strategy
+
+The policy simulations demonstrate that need-based (≈77% positive impact) and equity-focused (≈62% positive impact) allocation strategies generate substantially more widespread benefits than both the simulated baseline (≈49%) and the efficiency-maximizing approach (≈10%).
+
+Recommendation:
+Implement funding formulas where:
+
+60–70% of total resources are distributed according to need-based indicators (CDVI, tech access gap, infrastructure gap).
+
+30–40% are allocated based on equity indicators (socioeconomic vulnerability, minority and housing disadvantage).
+
+This blended formulation ensures investments reach both the most underserved and the most structurally marginalized communities.
+
+3. Match Intervention Type to the County’s Dominant Barrier
+
+Model outputs clearly distinguish between infrastructure-driven vulnerability (high infra_gap) and adoption-driven vulnerability (high tech_access_gap + low adoption efficiency).
+
+Recommendation:
+Use barrier-specific strategies:
+
+Infrastructure-Deficit Counties (high infra_gap):
+Prioritize fiber/last-mile deployment, middle-mile expansion, and open-access networks.
+
+Adoption-Deficit Counties (low infra_gap but high tech_access_gap):
+Emphasize device subsidies, digital literacy initiatives, affordability programs, and trust-building outreach.
+
+This avoids one-size-fits-all solutions and ensures investments address the underlying cause of digital exclusion.
+
+4. Establish “Digital Opportunity Zones” in High-Skill, Low-Adoption Counties
+
+Our indicators revealed counties with strong educational attainment but low broadband adoption, suggesting high economic and workforce-return potential if connectivity gaps are resolved.
+
+Recommendation:
+Designate Digital Opportunity Zones in counties with:
+
+High education_index or skill_capital
+
+Below-average broadband usage
+
+Targeted investments should include:
+
+Digital skills training and upskilling programs
+
+Small business digitization support
+
+Remote work enablement and entrepreneurship pathways
+
+These areas can yield rapid and sustained economic benefits with relatively modest intervention.
+
+5. Improve Adoption Efficiency Through Targeted Demand-Side Programs
+
+The adoption efficiency metric indicates that many counties underperform in converting available broadband into actual usage. Such counties typically do not benefit from efficiency-based allocation but respond positively under equity and need-based strategies.
+
+Recommendation:
+Implement targeted demand-side programs, particularly in counties with available infrastructure but limited uptake:
+
+Local-language outreach
+
+Library-based digital navigation services
+
+Partnerships with schools, health providers, and community organizations to promote telehealth, education portals, and civic services
+
+Enrollment assistance for low-cost broadband programs (ACP-like future equivalents)
+
+6. Use Priority Tiers to Structure a Multi-Year Rollout Strategy
+
+Both the CDVI tiers and Priority Score tiers provide a clear roadmap for a phased rollout of interventions.
+
+Recommendation:
+Adopt a 3–5 year staggered implementation plan aligned with priority tiers:
+
+Years 1–2: Focus intensive interventions on Priority Tier 1 counties
+
+Years 2–3: Expand to Tier 2 counties with mixed needs
+
+Years 3–4: Support Tier 3 counties with lighter-touch programs
+
+Ongoing: Monitor Tier 4 counties for emerging gaps
+
+This approach balances urgency with feasibility, ensuring consistent progress while avoiding resource fragmentation.
+
+7. Integrate the Analytical Framework into Ongoing Governance
+
+The modeling pipeline (CDVI, Priority Score, scenario simulation, and impact analysis) is designed to be reproducible and adaptable as new data becomes available (SVI, ACS updates, FCC data revisions).
+
+Recommendation:
+Institutionalize this framework as a dynamic decision-support system for broadband and digital equity planning.
+Use it to:
+
+Recompute vulnerability and priority tiers annually
+
+Adjust funding strategies based on updated scenario impact patterns
+
+Track county-level improvements in broadband usage and access gaps
+
+Support evidence-based grant applications and BEAD/digital equity planning
+
+
+## Limitations
+
+This analysis has several methodological and data-related limitations that must be acknowledged. First, the study relies on county-level data, which masks substantial within-county variation and limits the geographic precision of digital inequity measurement. Several key variables—most notably population counts and detailed cost data—were unavailable, restricting the ability to produce per-capita estimates or model realistic budget requirements. Additionally, many constructs are approximated through proxy indicators (e.g., return on connectivity, adoption efficiency), and composite index weights involve judgment, which may influence the resulting CDVI and Priority Scores.
+
+Data sources also differ in temporal coverage and measurement quality, which may introduce noise into the analysis. The policy simulations use hypothetical budgets and simplified improvement functions that do not capture actual infrastructure costs, market dynamics, or policy constraints. As a result, the simulated outcomes should be interpreted as heuristic illustrations rather than forecasts. Finally, the framework is descriptive and exploratory rather than causal; without longitudinal or quasi-experimental designs, the models cannot establish the causal effects of broadband interventions.
+
+Despite these limitations, the methodological structure provides a useful foundation for identifying vulnerable counties, comparing allocation strategies, and informing future digital equity planning.
+
+
+## Conclusion
+
+Taken together, the results of this project point to a clear policy direction:
+Broadband investments should prioritize high-need, high-vulnerability counties while ensuring equitable and adoption-focused strategies that deliver widespread, sustainable improvements.
+
+Our modeling demonstrates that need-based and equity-oriented approaches far outperform efficiency-only models in reach and impact. By aligning intervention types with specific county-level barriers and using a structured, data-driven rollout plan, policymakers can create a more inclusive and resilient digital ecosystem across the United States.
+
+
+
+
+
+

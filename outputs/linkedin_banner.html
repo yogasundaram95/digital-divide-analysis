@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Digital Divide Project - LinkedIn Banner</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f3f4f6;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .label {
+            background: #333;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        /* Main Project Card */
+        .project-card {
+            width: 1200px;
+            height: 627px;
+            background: linear-gradient(135deg, #1a365d 0%, #2c5282 50%, #2b6cb0 100%);
+            border-radius: 0;
+            padding: 60px;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .project-card::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 70%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+        }
+
+        .badge {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: inline-block;
+            margin-bottom: 30px;
+        }
+
+        .project-card h1 {
+            font-size: 64px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            line-height: 1.1;
+        }
+
+        .subtitle {
+            font-size: 24px;
+            opacity: 0.9;
+            margin-bottom: 50px;
+            max-width: 700px;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 50px;
+        }
+
+        .stat-box {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 48px;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .tech-stack {
+            position: absolute;
+            bottom: 60px;
+            left: 60px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .tech-tag {
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .author {
+            position: absolute;
+            bottom: 60px;
+            right: 60px;
+            text-align: right;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        /* Stats Infographic */
+        .infographic {
+            width: 1200px;
+            background: white;
+            border-radius: 20px;
+            padding: 50px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .info-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .info-header h2 {
+            color: #1a365d;
+            font-size: 36px;
+            margin-bottom: 10px;
+        }
+
+        .info-header p {
+            color: #666;
+            font-size: 18px;
+        }
+
+        .findings-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 30px;
+        }
+
+        .finding-card {
+            background: #f8fafc;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            border-top: 4px solid #2b6cb0;
+        }
+
+        .finding-card.alert {
+            border-top-color: #e53e3e;
+        }
+
+        .finding-card.warning {
+            border-top-color: #dd6b20;
+        }
+
+        .finding-icon {
+            font-size: 40px;
+            margin-bottom: 15px;
+        }
+
+        .finding-number {
+            font-size: 42px;
+            font-weight: 700;
+            color: #1a365d;
+        }
+
+        .finding-label {
+            color: #666;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        /* Quote Card */
+        .quote-card {
+            width: 1200px;
+            background: linear-gradient(135deg, #1a365d, #2c5282);
+            border-radius: 20px;
+            padding: 60px;
+            color: white;
+            text-align: center;
+        }
+
+        .quote-card blockquote {
+            font-size: 32px;
+            font-style: italic;
+            margin-bottom: 30px;
+            line-height: 1.4;
+        }
+
+        .quote-card .source {
+            font-size: 18px;
+            opacity: 0.8;
+        }
+
+        .comparison {
+            display: flex;
+            justify-content: center;
+            gap: 60px;
+            margin-top: 40px;
+        }
+
+        .compare-item {
+            text-align: center;
+        }
+
+        .compare-item .number {
+            font-size: 64px;
+            font-weight: 700;
+        }
+
+        .compare-item .label {
+            background: transparent;
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .vs {
+            font-size: 24px;
+            align-self: center;
+            opacity: 0.6;
+        }
+
+        /* Instructions */
+        .instructions {
+            background: #fffbeb;
+            border: 2px solid #f59e0b;
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        .instructions h3 {
+            color: #92400e;
+            margin-bottom: 10px;
+        }
+
+        .instructions p {
+            color: #78350f;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="instructions">
+        <h3>How to Save These Images</h3>
+        <p>Right-click each card → "Take Screenshot" or use Cmd+Shift+4 (Mac) / Win+Shift+S (Windows) to capture each section for LinkedIn.</p>
+    </div>
+
+    <!-- MAIN PROJECT BANNER (1200x627 - LinkedIn recommended) -->
+    <div class="label">LinkedIn Post Image (1200x627)</div>
+    <div class="project-card">
+        <div class="badge">DATA SCIENCE PROJECT</div>
+        <h1>The Digital Divide<br>in America</h1>
+        <p class="subtitle">Analyzing broadband inequality across 3,100+ U.S. counties using spatial analysis and machine learning</p>
+
+        <div class="stats-row">
+            <div class="stat-box">
+                <div class="stat-number">3,120</div>
+                <div class="stat-label">Counties Analyzed</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">6</div>
+                <div class="stat-label">Data Sources</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">12.4%</div>
+                <div class="stat-label">Below 25 Mbps</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-number">6x</div>
+                <div class="stat-label">Rural Disadvantage</div>
+            </div>
+        </div>
+
+        <div class="tech-stack">
+            <span class="tech-tag">R</span>
+            <span class="tech-tag">Spatial Analysis</span>
+            <span class="tech-tag">Machine Learning</span>
+            <span class="tech-tag">Data Visualization</span>
+        </div>
+
+        <div class="author">
+            Yoga Sundaram<br>
+            <span style="opacity: 0.7;">github.com/yogasundaram95</span>
+        </div>
+    </div>
+
+    <!-- KEY FINDINGS INFOGRAPHIC -->
+    <div class="label">Key Findings Infographic</div>
+    <div class="infographic">
+        <div class="info-header">
+            <h2>Key Findings: America's Digital Divide</h2>
+            <p>What the data reveals about broadband inequality</p>
+        </div>
+
+        <div class="findings-grid">
+            <div class="finding-card alert">
+                <div class="finding-icon">📡</div>
+                <div class="finding-number">12.4%</div>
+                <div class="finding-label">of counties have actual speeds<br>BELOW the 25 Mbps threshold</div>
+            </div>
+
+            <div class="finding-card warning">
+                <div class="finding-icon">🌾</div>
+                <div class="finding-number">6x</div>
+                <div class="finding-label">Rural areas more likely to<br>lack adequate internet</div>
+            </div>
+
+            <div class="finding-card">
+                <div class="finding-icon">📊</div>
+                <div class="finding-number">3,120</div>
+                <div class="finding-label">U.S. counties analyzed<br>with 30+ variables each</div>
+            </div>
+
+            <div class="finding-card alert">
+                <div class="finding-icon">⚠️</div>
+                <div class="finding-number">0.4</div>
+                <div class="finding-label">Mbps actual speed in a county<br>with "100% FCC coverage"</div>
+            </div>
+
+            <div class="finding-card">
+                <div class="finding-icon">🗺️</div>
+                <div class="finding-number">0.53</div>
+                <div class="finding-label">Moran's I spatial correlation<br>Digital divide clusters regionally</div>
+            </div>
+
+            <div class="finding-card warning">
+                <div class="finding-icon">💰</div>
+                <div class="finding-number">$42B</div>
+                <div class="finding-label">BEAD program funding<br>being allocated on flawed data</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FCC vs REALITY COMPARISON -->
+    <div class="label">The Coverage Gap</div>
+    <div class="quote-card">
+        <blockquote>"100% of locations have 25 Mbps broadband available"</blockquote>
+        <div class="source">— FCC Official Data</div>
+
+        <div class="comparison">
+            <div class="compare-item">
+                <div class="number" style="color: #68d391;">100%</div>
+                <div class="label">FCC Reported Coverage</div>
+            </div>
+            <div class="vs">vs</div>
+            <div class="compare-item">
+                <div class="number" style="color: #fc8181;">12.4%</div>
+                <div class="label">Counties Below Threshold</div>
+            </div>
+        </div>
+
+        <p style="margin-top: 40px; font-size: 20px; opacity: 0.9;">
+            Availability ≠ Performance. Policy decisions based on flawed data leave millions behind.
+        </p>
+    </div>
+
+</body>
+</html>

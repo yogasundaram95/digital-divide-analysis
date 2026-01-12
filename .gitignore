@@ -23,3 +23,7 @@ Thumbs.db
 *.tmp
 *.bak
 *.tex
+
+# LinkedIn content (keep local only)
+outputs/linkedin_*.html
+outputs/linkedin_*.md

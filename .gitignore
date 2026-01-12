@@ -7,12 +7,8 @@
 .RDataTmp*
 
 # Large raw data files (too big for GitHub)
-raw_data/ookla_csv/*.csv
-raw_data/ookla/**/*.dbf
-raw_data/ookla/**/*.shp
-raw_data/geographic/*.shp
-raw_data/geographic/*.dbf
-raw_data/*.csv
+raw_data/
+raw_data/**/*
 
 # Large processed spatial files (>50MB)
 processed_data/*_sf.rds

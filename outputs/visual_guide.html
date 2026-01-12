@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Divide Project - Visual Guide</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .page {
+            background: white;
+            padding: 40px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            page-break-after: always;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            border-bottom: 4px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        h2 {
+            color: #2980b9;
+            font-size: 1.8em;
+            margin: 30px 0 15px 0;
+            border-left: 5px solid #3498db;
+            padding-left: 15px;
+        }
+
+        h3 {
+            color: #16a085;
+            font-size: 1.3em;
+            margin: 20px 0 10px 0;
+        }
+
+        .subtitle {
+            color: #7f8c8d;
+            font-size: 1.2em;
+            margin-bottom: 30px;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .highlight-box h3 {
+            color: white;
+            margin-top: 0;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 5px solid #3498db;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .warning-box {
+            background: #fdf2e9;
+            border-left: 5px solid #e74c3c;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .success-box {
+            background: #e8f8f5;
+            border-left: 5px solid #27ae60;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 0 10px 10px 0;
+        }
+
+        .diagram {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 30px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+
+        .flow-diagram {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin: 30px 0;
+        }
+
+        .flow-box {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            padding: 15px 25px;
+            border-radius: 10px;
+            text-align: center;
+            min-width: 150px;
+            font-weight: bold;
+        }
+
+        .flow-arrow {
+            font-size: 2em;
+            color: #3498db;
+        }
+
+        .data-card {
+            display: inline-block;
+            width: calc(33% - 20px);
+            background: white;
+            border: 2px solid #3498db;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 10px;
+            vertical-align: top;
+        }
+
+        .data-card h4 {
+            color: #2980b9;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .data-card .icon {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #3498db;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        tr:hover {
+            background: #e8f4f8;
+        }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+
+        .stat-card .label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .comparison-table {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .compare-box {
+            padding: 20px;
+            border-radius: 10px;
+        }
+
+        .compare-box.good {
+            background: #d4edda;
+            border: 2px solid #28a745;
+        }
+
+        .compare-box.bad {
+            background: #f8d7da;
+            border: 2px solid #dc3545;
+        }
+
+        .step-number {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            background: #3498db;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 40px;
+            font-weight: bold;
+            margin-right: 15px;
+        }
+
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        .code-block .comment {
+            color: #6a9955;
+        }
+
+        .code-block .keyword {
+            color: #569cd6;
+        }
+
+        .code-block .string {
+            color: #ce9178;
+        }
+
+        .emoji {
+            font-size: 1.5em;
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+
+        .finding-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 15px 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            border-top: 5px solid #3498db;
+        }
+
+        .finding-card.critical {
+            border-top-color: #e74c3c;
+        }
+
+        .finding-card.success {
+            border-top-color: #27ae60;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc li {
+            padding: 8px 0;
+            border-bottom: 1px dashed #ddd;
+        }
+
+        .toc a {
+            color: #2980b9;
+            text-decoration: none;
+        }
+
+        .toc a:hover {
+            color: #3498db;
+            text-decoration: underline;
+        }
+
+        .print-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .print-button:hover {
+            background: #2980b9;
+        }
+
+        @media print {
+            .print-button {
+                display: none;
+            }
+            body {
+                background: white;
+            }
+            .page {
+                box-shadow: none;
+                margin: 0;
+                padding: 20px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .data-card {
+                width: 100%;
+            }
+            .stat-grid {
+                grid-template-columns: 1fr;
+            }
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+            .comparison-table {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="print-button" onclick="window.print()">Save as PDF</button>
+
+    <!-- PAGE 1: TITLE -->
+    <div class="page">
+        <h1>The Digital Divide Project</h1>
+        <p class="subtitle">A Visual Guide to Understanding Broadband Inequality in America</p>
+
+        <div class="highlight-box">
+            <h3>What You'll Learn</h3>
+            <p>This guide explains how we analyzed internet access across 3,100+ U.S. counties to find out who has good internet, who doesn't, and what we can do about it.</p>
+        </div>
+
+        <div class="toc">
+            <h3>Table of Contents</h3>
+            <ul>
+                <li><a href="#what">1. What is the Digital Divide?</a></li>
+                <li><a href="#data">2. The Data We Used</a></li>
+                <li><a href="#process">3. How the Analysis Works</a></li>
+                <li><a href="#findings">4. Key Discoveries</a></li>
+                <li><a href="#run">5. How to Run the Code</a></li>
+                <li><a href="#glossary">6. Glossary</a></li>
+            </ul>
+        </div>
+
+        <div class="stat-grid">
+            <div class="stat-card">
+                <div class="number">3,120</div>
+                <div class="label">Counties Analyzed</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">6</div>
+                <div class="label">Data Sources Combined</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">12.4%</div>
+                <div class="label">Counties Below 25 Mbps</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 2: WHAT IS THE DIGITAL DIVIDE -->
+    <div class="page" id="what">
+        <h2>1. What is the Digital Divide?</h2>
+
+        <div class="two-column">
+            <div class="compare-box good">
+                <h3>Fast Internet Home</h3>
+                <ul>
+                    <li>Videos play instantly</li>
+                    <li>Video calls are smooth</li>
+                    <li>Downloads take seconds</li>
+                    <li>Online homework is easy</li>
+                    <li>Parents can work from home</li>
+                </ul>
+            </div>
+            <div class="compare-box bad">
+                <h3>Slow Internet Home</h3>
+                <ul>
+                    <li>Videos buffer constantly</li>
+                    <li>Video calls freeze/drop</li>
+                    <li>Downloads take hours</li>
+                    <li>Online homework frustrating</li>
+                    <li>Work from home impossible</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <h3>The Digital Divide = The gap between these two experiences</h3>
+            <p>It's not just about convenience - it affects education, jobs, healthcare, and opportunity.</p>
+        </div>
+
+        <h3>Why Does It Happen?</h3>
+
+        <div class="diagram">
+<pre>
+    CAUSES OF THE DIGITAL DIVIDE
+
+    INFRASTRUCTURE              AFFORDABILITY              SKILLS
+    ┌─────────────┐            ┌─────────────┐           ┌─────────────┐
+    │ Rural areas │            │ Monthly cost│           │ Don't know  │
+    │ expensive   │            │ too high    │           │ how to use  │
+    │ to wire     │            │ for some    │           │ technology  │
+    └─────────────┘            └─────────────┘           └─────────────┘
+          │                          │                         │
+          └──────────────────────────┼─────────────────────────┘
+                                     ▼
+                        ┌─────────────────────────┐
+                        │    DIGITAL DIVIDE       │
+                        │  Some have it, some don't│
+                        └─────────────────────────┘
+</pre>
+        </div>
+    </div>
+
+    <!-- PAGE 3: THE DATA -->
+    <div class="page" id="data">
+        <h2>2. The Data We Used</h2>
+        <p>We combined 6 different datasets - like puzzle pieces - to see the complete picture.</p>
+
+        <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+            <div class="data-card">
+                <div class="icon">📡</div>
+                <h4>FCC Broadband Data</h4>
+                <p><strong>What:</strong> Official government data on where internet is "available"</p>
+                <p><strong>Problem:</strong> Often overstates coverage!</p>
+            </div>
+
+            <div class="data-card">
+                <div class="icon">⚡</div>
+                <h4>Ookla Speedtest</h4>
+                <p><strong>What:</strong> Real speed tests from real people</p>
+                <p><strong>Why it matters:</strong> Shows actual performance</p>
+            </div>
+
+            <div class="data-card">
+                <div class="icon">🏢</div>
+                <h4>Microsoft Airband</h4>
+                <p><strong>What:</strong> Gap between availability and usage</p>
+                <p><strong>Shows:</strong> Who's actually connected</p>
+            </div>
+
+            <div class="data-card">
+                <div class="icon">🏥</div>
+                <h4>CDC Social Vulnerability</h4>
+                <p><strong>What:</strong> How vulnerable each community is</p>
+                <p><strong>Includes:</strong> Income, age, disabilities</p>
+            </div>
+
+            <div class="data-card">
+                <div class="icon">🌾</div>
+                <h4>USDA Rural Codes</h4>
+                <p><strong>What:</strong> How rural/urban each county is</p>
+                <p><strong>Scale:</strong> 1 (big city) to 9 (remote rural)</p>
+            </div>
+
+            <div class="data-card">
+                <div class="icon">📊</div>
+                <h4>Census Data</h4>
+                <p><strong>What:</strong> Income, education, internet at home</p>
+                <p><strong>From:</strong> American Community Survey</p>
+            </div>
+        </div>
+
+        <div class="diagram">
+<pre>
+                        DATA INTEGRATION PROCESS
+
+    ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+    │   FCC    │   │  Ookla   │   │Microsoft │   │   CDC    │
+    │ Broadband│   │ Speedtest│   │ Airband  │   │   SVI    │
+    └────┬─────┘   └────┬─────┘   └────┬─────┘   └────┬─────┘
+         │              │              │              │
+         └──────────────┴──────┬───────┴──────────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   COUNTY FIPS CODE  │ ◄── Unique ID for each county
+                    │    (e.g., 06037)    │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   MASTER DATASET    │
+                    │   3,120 counties    │
+                    │   30+ variables     │
+                    └─────────────────────┘
+</pre>
+        </div>
+    </div>
+
+    <!-- PAGE 4: THE PROCESS -->
+    <div class="page" id="process">
+        <h2>3. How the Analysis Works</h2>
+
+        <div class="flow-diagram">
+            <div class="flow-box">1. CLEAN</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">2. MERGE</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">3. CALCULATE</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">4. ANALYZE</div>
+            <span class="flow-arrow">→</span>
+            <div class="flow-box">5. RANK</div>
+        </div>
+
+        <h3><span class="step-number">1</span>Clean the Data</h3>
+        <p>Remove errors, fix formats, handle missing values. Like washing vegetables before cooking!</p>
+
+        <h3><span class="step-number">2</span>Merge Everything</h3>
+        <p>Connect all 6 datasets using county ID codes (FIPS). Now each county has ALL its information in one row.</p>
+
+        <h3><span class="step-number">3</span>Calculate New Metrics</h3>
+        <div class="info-box">
+            <h4>Key Formulas We Created:</h4>
+            <p><strong>Digital Vulnerability Score</strong> = 50% Social Vulnerability + 30% (1 - Usage) + 20% No Access Rate</p>
+            <p><strong>Broadband Gap</strong> = FCC Availability - Actual Usage</p>
+            <p><strong>Priority Score</strong> = Combination of vulnerability, gaps, and efficiency</p>
+        </div>
+
+        <h3><span class="step-number">4</span>Run Analysis</h3>
+        <div class="diagram">
+<pre>
+    ANALYSIS METHODS USED
+
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │   REGRESSION    │    │    SPATIAL      │    │   MACHINE       │
+    │                 │    │                 │    │   LEARNING      │
+    │ What factors    │    │ Do nearby       │    │ Computer finds  │
+    │ predict bad     │    │ counties have   │    │ patterns we     │
+    │ internet?       │    │ similar issues? │    │ might miss      │
+    └─────────────────┘    └─────────────────┘    └─────────────────┘
+</pre>
+        </div>
+
+        <h3><span class="step-number">5</span>Create Rankings</h3>
+        <p>Every county gets a Priority Score. Higher score = needs more help.</p>
+
+        <table>
+            <tr>
+                <th>Priority Tier</th>
+                <th>What It Means</th>
+                <th>% of Counties</th>
+            </tr>
+            <tr>
+                <td style="color: #e74c3c; font-weight: bold;">Tier 1 (Highest)</td>
+                <td>Urgent - needs immediate intervention</td>
+                <td>25%</td>
+            </tr>
+            <tr>
+                <td style="color: #e67e22; font-weight: bold;">Tier 2</td>
+                <td>High priority</td>
+                <td>25%</td>
+            </tr>
+            <tr>
+                <td style="color: #f1c40f; font-weight: bold;">Tier 3</td>
+                <td>Moderate priority</td>
+                <td>25%</td>
+            </tr>
+            <tr>
+                <td style="color: #27ae60; font-weight: bold;">Tier 4 (Lowest)</td>
+                <td>Lower priority - doing okay</td>
+                <td>25%</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- PAGE 5: KEY FINDINGS -->
+    <div class="page" id="findings">
+        <h2>4. Key Discoveries</h2>
+
+        <div class="finding-card critical">
+            <h3>Discovery #1: FCC Data is Wrong</h3>
+            <div class="comparison-table">
+                <div class="compare-box bad">
+                    <h4>What FCC Says:</h4>
+                    <p style="font-size: 2em; font-weight: bold;">100%</p>
+                    <p>of locations have 25 Mbps available</p>
+                </div>
+                <div class="compare-box bad">
+                    <h4>Reality (Ookla):</h4>
+                    <p style="font-size: 2em; font-weight: bold;">12.4%</p>
+                    <p>of counties have speeds BELOW 25 Mbps</p>
+                </div>
+            </div>
+            <p><strong>Worst Examples:</strong> Keya Paha County, NE has 100% "coverage" but only 0.4 Mbps actual speed!</p>
+        </div>
+
+        <div class="finding-card critical">
+            <h3>Discovery #2: Rural America is Left Behind</h3>
+            <table>
+                <tr>
+                    <th>Area Type</th>
+                    <th>Avg Download</th>
+                    <th>% Below 25 Mbps</th>
+                </tr>
+                <tr>
+                    <td>Metro (Cities)</td>
+                    <td>110 Mbps</td>
+                    <td style="color: #27ae60;">3.9%</td>
+                </tr>
+                <tr>
+                    <td>Near Cities</td>
+                    <td>82 Mbps</td>
+                    <td style="color: #f1c40f;">2.8%</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold;">Remote Rural</td>
+                    <td style="font-weight: bold;">52 Mbps</td>
+                    <td style="color: #e74c3c; font-weight: bold;">25.1%</td>
+                </tr>
+            </table>
+            <div class="warning-box">
+                <strong>Key Finding:</strong> Rural areas are 6x more likely to have inadequate internet!
+            </div>
+        </div>
+
+        <div class="finding-card">
+            <h3>Discovery #3: Big Cities Have Big Numbers Too</h3>
+            <p>Our top priority counties are large metro areas because they have the most TOTAL underserved people:</p>
+            <table>
+                <tr>
+                    <th>Rank</th>
+                    <th>County</th>
+                    <th>State</th>
+                    <th>Usage</th>
+                </tr>
+                <tr><td>1</td><td>Los Angeles</td><td>CA</td><td>73.4%</td></tr>
+                <tr><td>2</td><td>Cook (Chicago)</td><td>IL</td><td>63.7%</td></tr>
+                <tr><td>3</td><td>Harris (Houston)</td><td>TX</td><td>70.8%</td></tr>
+                <tr><td>4</td><td>Miami-Dade</td><td>FL</td><td>68.1%</td></tr>
+                <tr><td>5</td><td>Kings (Brooklyn)</td><td>NY</td><td>56.8%</td></tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- PAGE 6: HOW TO RUN -->
+    <div class="page" id="run">
+        <h2>5. How to Run the Code</h2>
+
+        <h3>What You Need</h3>
+        <div class="flow-diagram">
+            <div class="flow-box">R Language</div>
+            <span class="flow-arrow">+</span>
+            <div class="flow-box">RStudio</div>
+            <span class="flow-arrow">+</span>
+            <div class="flow-box">Packages</div>
+        </div>
+
+        <h3>Step-by-Step Instructions</h3>
+
+        <div class="info-box">
+            <h4><span class="step-number">1</span>Install R</h4>
+            <p>Download from: <strong>https://cran.r-project.org/</strong></p>
+            <p>Choose your operating system and follow the installer.</p>
+        </div>
+
+        <div class="info-box">
+            <h4><span class="step-number">2</span>Install RStudio</h4>
+            <p>Download from: <strong>https://posit.co/download/rstudio-desktop/</strong></p>
+            <p>This gives you a nice interface to work with R.</p>
+        </div>
+
+        <div class="info-box">
+            <h4><span class="step-number">3</span>Install Packages</h4>
+            <p>Open RStudio and run this code:</p>
+            <div class="code-block">
+<span class="comment"># Install all required packages</span>
+install.packages(c(
+  <span class="string">"tidyverse"</span>,     <span class="comment"># Data manipulation</span>
+  <span class="string">"sf"</span>,            <span class="comment"># Maps and spatial data</span>
+  <span class="string">"spdep"</span>,         <span class="comment"># Spatial statistics</span>
+  <span class="string">"caret"</span>,         <span class="comment"># Machine learning</span>
+  <span class="string">"corrplot"</span>       <span class="comment"># Correlation plots</span>
+))
+            </div>
+        </div>
+
+        <div class="info-box">
+            <h4><span class="step-number">4</span>Open the Project</h4>
+            <p>In RStudio: File → Open Project → Select <code>digital_divide_project.Rproj</code></p>
+        </div>
+
+        <div class="info-box">
+            <h4><span class="step-number">5</span>Run the Analysis</h4>
+            <p><strong>Option A (Easiest):</strong> Just open <code>digital_divide_project.html</code> in your browser!</p>
+            <p><strong>Option B:</strong> Open <code>digital_divide_project.Rmd</code> and click "Knit"</p>
+            <p><strong>Option C:</strong> Run the quick analysis script:</p>
+            <div class="code-block">
+<span class="keyword">Rscript</span> scripts/run_policy_analysis.R
+            </div>
+        </div>
+
+        <h3>Project File Structure</h3>
+        <div class="diagram">
+<pre>
+digital_divide_project/
+│
+├── digital_divide_project.Rmd    ← Main analysis code
+├── digital_divide_project.html   ← Finished report (OPEN THIS!)
+├── BEGINNERS_GUIDE.md            ← Text version of this guide
+│
+├── raw_data/                     ← Original data files
+├── processed_data/               ← Cleaned data
+├── scripts/                      ← Helper scripts
+└── outputs/                      ← Results and exports
+</pre>
+        </div>
+    </div>
+
+    <!-- PAGE 7: GLOSSARY -->
+    <div class="page" id="glossary">
+        <h2>6. Glossary</h2>
+        <p>Technical terms explained simply:</p>
+
+        <table>
+            <tr>
+                <th>Term</th>
+                <th>Simple Explanation</th>
+            </tr>
+            <tr>
+                <td><strong>Broadband</strong></td>
+                <td>Fast internet (at least 25 Mbps download speed)</td>
+            </tr>
+            <tr>
+                <td><strong>Mbps</strong></td>
+                <td>Megabits per second - how we measure internet speed. Higher = faster.</td>
+            </tr>
+            <tr>
+                <td><strong>Download Speed</strong></td>
+                <td>How fast you can GET stuff from the internet (watching videos, loading pages)</td>
+            </tr>
+            <tr>
+                <td><strong>Upload Speed</strong></td>
+                <td>How fast you can SEND stuff to the internet (video calls, uploading photos)</td>
+            </tr>
+            <tr>
+                <td><strong>Latency</strong></td>
+                <td>The delay when data travels. Lower is better. Measured in milliseconds (ms).</td>
+            </tr>
+            <tr>
+                <td><strong>FCC</strong></td>
+                <td>Federal Communications Commission - the government agency that regulates internet</td>
+            </tr>
+            <tr>
+                <td><strong>FIPS Code</strong></td>
+                <td>A 5-digit ID number for each county (like 06037 = Los Angeles)</td>
+            </tr>
+            <tr>
+                <td><strong>SVI</strong></td>
+                <td>Social Vulnerability Index - measures how vulnerable a community is (0-1 scale)</td>
+            </tr>
+            <tr>
+                <td><strong>CDVI</strong></td>
+                <td>Our custom score for digital vulnerability - higher means more help needed</td>
+            </tr>
+            <tr>
+                <td><strong>Rural</strong></td>
+                <td>Areas far from cities with few people - often have worse internet</td>
+            </tr>
+            <tr>
+                <td><strong>Regression</strong></td>
+                <td>A math method to find what factors predict an outcome</td>
+            </tr>
+            <tr>
+                <td><strong>R / RStudio</strong></td>
+                <td>Programming language and software we use for the analysis</td>
+            </tr>
+        </table>
+
+        <div class="highlight-box" style="margin-top: 30px;">
+            <h3>Remember the Key Takeaways!</h3>
+            <ol>
+                <li><strong>FCC data overstates coverage</strong> - reality is different</li>
+                <li><strong>Rural areas are 6x more likely</strong> to have bad internet</li>
+                <li><strong>Vulnerable communities get hit hardest</strong></li>
+                <li><strong>Big cities have many underserved people</strong> by total numbers</li>
+                <li><strong>Regional approaches work best</strong> - nearby counties cluster</li>
+            </ol>
+        </div>
+
+        <div class="success-box" style="margin-top: 20px;">
+            <h3>You Made It!</h3>
+            <p>You now understand what the Digital Divide is, how we studied it, and what we found. To explore more, open the HTML report or try running the code yourself!</p>
+        </div>
+    </div>
+
+    <div style="text-align: center; padding: 40px; color: #7f8c8d;">
+        <p>Digital Divide Project - Visual Guide</p>
+        <p>Click "Save as PDF" button (top right) to download this guide</p>
+        <p>Created: January 2026</p>
+    </div>
+</body>
+</html>

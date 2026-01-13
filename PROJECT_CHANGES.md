@@ -273,4 +273,3 @@ The enhanced project provides actionable insights into broadband inequity, with 
 ---
 
 *Document generated: January 5, 2026*
-*Project enhanced with Claude Code assistance*
